@@ -1,0 +1,1 @@
+add_library(decadriver deca_device.c deca_params_init.c deca_device_api.h deca_param_types.h deca_regs.h deca_types.h deca_version.h)

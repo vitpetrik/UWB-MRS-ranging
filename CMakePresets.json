@@ -1,0 +1,23 @@
+{
+    "version": 2,
+    "cmakeMinimumRequired": {
+        "major": 3,
+        "minor": 20
+    },
+    "configurePresets": [
+        {
+            "name": "build",
+            "displayName": "Build for Decawave DWM1001 DEV",
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/build",
+            "cacheVariables": {
+                "NCS_TOOLCHAIN_VERSION": "NONE",
+                "BOARD": "decawave_dwm1001_dev",
+                "DTC_OVERLAY_FILE": "${sourceDir}/decawave_dwm1001_dev.overlay",
+                "CONF_FILE": "${sourceDir}/prj.conf",
+                "OVERLAY_CONFIG": "",
+                "SHIELD": ""
+            }
+        }
+    ]
+}

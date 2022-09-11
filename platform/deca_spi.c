@@ -1,0 +1,109 @@
+/*! ----------------------------------------------------------------------------
+ * @file	deca_spi.c
+ * @brief	SPI access functions
+ *
+ * @attention
+ *
+ * Copyright 2013 (c) DecaWave Ltd, Dublin, Ireland.
+ *
+ * All rights reserved.
+ *
+ * @author DecaWave
+ */
+#include <string.h>
+
+#include <zephyr/zephyr.h>
+#include <zephyr/device.h>
+#include <zephyr/devicetree.h>
+#include <zephyr/drivers/sensor.h>
+#include <zephyr/drivers/gpio.h>
+#include <zephyr/drivers/spi.h>
+
+#include "deca_device_api.h"
+#include "platform.h"
+
+struct device *spi = DEVICE_DT_GET(DT_NODELABEL(spi2));
+
+const struct spi_cs_control cs_ctrl = {
+    .gpio_dev = DEVICE_DT_GET(DT_NODELABEL(gpio0)),
+    .delay = 0,
+    .gpio_pin = 17,
+    .gpio_dt_flags = GPIO_ACTIVE_LOW,
+};
+
+struct spi_config spi_cfg = {
+    .frequency = 3600000U,
+    .operation = SPI_WORD_SET(8) | SPI_TRANSFER_MSB | SPI_OP_MODE_MASTER,
+    .cs = &cs_ctrl};
+
+/*! ------------------------------------------------------------------------------------------------------------------
+ * Function: writetospi()
+ *
+ * Low level abstract function to write to the SPI
+ * Takes two separate byte buffers for write header and write data
+ * returns 0 for success, or -1 for error
+ */
+int writetospi(uint16 headerLength, const uint8 *headerBuffer, uint32 bodylength, const uint8 *bodyBuffer)
+{
+    struct spi_buf spi_buf_tx[] = {
+        {.buf = headerBuffer,
+         .len = headerLength},
+        {.buf = bodyBuffer,
+         .len = bodylength}};
+
+    struct spi_buf spi_buf_rx[] = {
+        {.buf = NULL,
+         .len = headerLength},
+        {.buf = NULL,
+         .len = bodylength}};
+
+    struct spi_buf_set buff_tx = {.buffers = spi_buf_tx, .count = 2};
+    struct spi_buf_set buff_rx = {.buffers = spi_buf_rx, .count = 2};
+
+    int error = spi_transceive(spi, &spi_cfg, &buff_tx, &buff_rx);
+
+    if (error < 0)
+        return -1;
+
+    return 0;
+
+} // end writetospi()
+
+/*! ------------------------------------------------------------------------------------------------------------------
+ * Function: readfromspi()
+ *
+ * Low level abstract function to read from the SPI
+ * Takes two separate byte buffers for write header and read data
+ * returns the offset into read buffer where first byte of read data may be found,
+ * or returns -1 if there was an error
+ */
+int readfromspi(uint16 headerLength, const uint8 *headerBuffer, uint32 readlength, uint8 *readBuffer)
+{
+    uint8 empty_buffer[readlength];
+    memset(empty_buffer, 0, readlength);
+    const struct spi_buf spi_buf_tx[] = {
+        {.buf = headerBuffer,
+         .len = headerLength},
+        {.buf = empty_buffer,
+         .len = readlength}};
+    struct spi_buf spi_buf_rx[] = {
+        {.buf = NULL,
+         .len = headerLength},
+        {.buf = readBuffer,
+         .len = readlength}};
+
+    struct spi_buf_set buff_tx = {.buffers = spi_buf_tx, .count = 2};
+    struct spi_buf_set buff_rx = {.buffers = spi_buf_rx, .count = 2};
+
+    int error = spi_transceive(spi, &spi_cfg, &buff_tx, &buff_rx);
+
+    if (error < 0)
+        return -1;
+
+    return 0;
+} // end readfromspi()
+
+void spi_set_rate_high()
+{
+    spi_cfg.frequency = 8000000;
+}
