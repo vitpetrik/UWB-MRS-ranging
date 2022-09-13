@@ -9,7 +9,6 @@
 
 #include "platform.h"
 
-void dwm_int_callback(const struct device *dev, struct gpio_callback *cb, uint32_t pins);
 volatile struct gpio_callback dwm_int_cb_data;
 
 volatile struct gpio_dt_spec dwm_int = {
@@ -31,16 +30,11 @@ void dwt_hardreset()
 	gpio_pin_configure_dt(&dwm_reset, GPIO_OUTPUT_HIGH);
 }
 
-void dwt_hardinterrupt()
+void dwt_hardinterrupt(void* callback)
 {
 	gpio_pin_configure_dt(&dwm_int, GPIO_INPUT);
 	gpio_pin_interrupt_configure_dt(&dwm_int, GPIO_INT_EDGE_TO_ACTIVE);
 
-	gpio_init_callback(&dwm_int_cb_data, dwm_int_callback, BIT(dwm_int.pin));
+	gpio_init_callback(&dwm_int_cb_data, callback, BIT(dwm_int.pin));
 	gpio_add_callback(dwm_int.port, &dwm_int_cb_data);
-}
-
-void dwm_int_callback(const struct device *dev, struct gpio_callback *cb, uint32_t pins)
-{
-	dwt_isr();
 }
