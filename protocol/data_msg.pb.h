@@ -4,7 +4,7 @@
 #ifndef PB_DATA_MSG_PB_H_INCLUDED
 #define PB_DATA_MSG_PB_H_INCLUDED
 #include <pb.h>
-
+#define PB_BUFFER_ONLY
 #if PB_PROTO_HEADER_VERSION != 40
 #error Regenerate this file with the current version of nanopb generator.
 #endif
@@ -34,6 +34,7 @@ typedef struct _ranging_init_msg {
 typedef struct _ranging_response_msg { 
     uint32_t from_id;
     uint32_t to_id;
+    uint64_t delay;
 } ranging_response_msg;
 
 typedef struct _ranging_msg { 
@@ -71,12 +72,12 @@ extern "C" {
 /* Initializer values for message structs */
 #define beacon_msg_init_default                  {0, _UAV_TYPE_MIN, {0, 0}}
 #define ranging_init_msg_init_default            {0, 0}
-#define ranging_response_msg_init_default        {0, 0}
+#define ranging_response_msg_init_default        {0, 0, 0}
 #define ranging_msg_init_default                 {0, {ranging_init_msg_init_default}}
 #define data_msg_init_default                    {0, {beacon_msg_init_default}, {0, 0}}
 #define beacon_msg_init_zero                     {0, _UAV_TYPE_MIN, {0, 0}}
 #define ranging_init_msg_init_zero               {0, 0}
-#define ranging_response_msg_init_zero           {0, 0}
+#define ranging_response_msg_init_zero           {0, 0, 0}
 #define ranging_msg_init_zero                    {0, {ranging_init_msg_init_zero}}
 #define data_msg_init_zero                       {0, {beacon_msg_init_zero}, {0, 0}}
 
@@ -88,6 +89,7 @@ extern "C" {
 #define ranging_init_msg_to_id_tag               2
 #define ranging_response_msg_from_id_tag         1
 #define ranging_response_msg_to_id_tag           2
+#define ranging_response_msg_delay_tag           3
 #define ranging_msg_ranging_init_tag             1
 #define ranging_msg_ranging_response_tag         2
 #define data_msg_beacon_tag                      1
@@ -110,7 +112,8 @@ X(a, STATIC,   SINGULAR, UINT32,   to_id,             2)
 
 #define ranging_response_msg_FIELDLIST(X, a) \
 X(a, STATIC,   SINGULAR, UINT32,   from_id,           1) \
-X(a, STATIC,   SINGULAR, UINT32,   to_id,             2)
+X(a, STATIC,   SINGULAR, UINT32,   to_id,             2) \
+X(a, STATIC,   SINGULAR, UINT64,   delay,             3)
 #define ranging_response_msg_CALLBACK NULL
 #define ranging_response_msg_DEFAULT NULL
 
@@ -148,8 +151,8 @@ extern const pb_msgdesc_t data_msg_msg;
 #define beacon_msg_size                          26
 #define data_msg_size                            32
 #define ranging_init_msg_size                    12
-#define ranging_msg_size                         14
-#define ranging_response_msg_size                12
+#define ranging_msg_size                         25
+#define ranging_response_msg_size                23
 
 #ifdef __cplusplus
 } /* extern "C" */

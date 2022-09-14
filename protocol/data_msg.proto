@@ -27,6 +27,7 @@ message ranging_init_msg {
 message ranging_response_msg {
     uint32 from_id = 1;
     uint32 to_id = 2;
+    uint64 delay = 3;
 }
 
 message ranging_msg {

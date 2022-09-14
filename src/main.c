@@ -262,7 +262,9 @@ void process_ranging(ranging_msg *ranging, struct rx_queue_t *rx_metadata)
             break;
 
         // CALCULATE TX TIMESTAMP
-        uint32_t tx_timestamp = (rx_metadata->rx_timestamp + ((7000 * UUS_TO_DWT_TIME))) >> 8;
+        uint64_t tx_timestamp = rx_metadata->rx_timestamp + (12000 * UUS_TO_DWT_TIME);
+        tx_timestamp &= 0xffffffffffffff00;
+        uint64_t delay = tx_timestamp - rx_metadata->rx_timestamp;
 
         // CREATE RESPONSE DATA
         data_msg data_tx = data_msg_init_default;
@@ -271,6 +273,7 @@ void process_ranging(ranging_msg *ranging, struct rx_queue_t *rx_metadata)
 
         data_tx.data.ranging.data.ranging_response.from_id = device_id;
         data_tx.data.ranging.data.ranging_response.to_id = ranging_init->from_id;
+        data_tx.data.ranging.data.ranging_response.delay = delay;
 
         // ALLOCATE MEMORY FOR tx BUFFER AND QUEUE DATA
         uint8_t *buffer_tx = k_malloc(data_msg_size);
@@ -286,7 +289,7 @@ void process_ranging(ranging_msg *ranging, struct rx_queue_t *rx_metadata)
         queue_data->frame_buffer = buffer_tx;
 
         queue_data->ranging = 1;
-        queue_data->tx_delay = tx_timestamp;
+        queue_data->tx_delay = (uint32_t) (tx_timestamp >> 8);
         queue_data->tx_mode = DWT_START_TX_DELAYED | DWT_RESPONSE_EXPECTED;
 
         queue_data->tx_timestamp = NULL;
@@ -316,10 +319,9 @@ void process_ranging(ranging_msg *ranging, struct rx_queue_t *rx_metadata)
         uint64_t tx_timestamp = device->ranging.tx_timestamp;
 
         uint64_t timespan = rx_timestamp - tx_timestamp;
-        uint64_t responder_delay = 7000 * UUS_TO_DWT_TIME;
-        double diff = timespan - (1 - clockOffsetRatio) * responder_delay;
+        double diff = timespan - (1 - clockOffsetRatio) * ranging_response->delay;
 
-        double tof = (diff / 2.) * DWT_TIME_UNITS;
+        double tof = ((diff / 2.) * DWT_TIME_UNITS)-1.28156358e-7;
         double dist = tof * SPEED_OF_LIGHT;
         printf("tod: %g\n\r", tof);
         printf("distance: %g\n\r", dist);
@@ -505,10 +507,8 @@ void uwb_tx_thread(void)
         // SET DELAYED TX TIMESTAMP
         if (data_tx->tx_mode & DWT_START_TX_DELAYED)
         {
-            printf("SYS time %u | tx_delay time | %u\n\r", dwt_readsystimestamphi32(), data_tx->tx_delay);
             dwt_setdelayedtrxtime(data_tx->tx_delay);
         }
-
 
         // START TRANSMITTING
         int status = dwt_starttx(data_tx->tx_mode);
@@ -571,10 +571,6 @@ void uwb_rxok(const dwt_cb_data_t *data)
     dwt_readrxdata(buffer_rx, msg_length, 0);
     uint64_t rx_ts = get_rx_timestamp_u64();
     int32_t integrator = dwt_readcarrierintegrator();
-    
-    printf("Sys time on rxok %u\n\r", dwt_readsystimestamphi32());
-
-    dwt_rxenable(DWT_START_RX_IMMEDIATE);
 
     // INIT QUEUE DATA AND SEND TO RX THREAD THROUGH QUEUE
     queue->cb_data = data;

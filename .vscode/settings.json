@@ -8,7 +8,8 @@
         "deca_device_api.h": "c",
         "beacon.pb.h": "c",
         "zephyr.h": "c",
-        "kernel.h": "c"
+        "kernel.h": "c",
+        "pb.h": "c"
     },
     "cortex-debug.variableUseNaturalFormat": false
 }
