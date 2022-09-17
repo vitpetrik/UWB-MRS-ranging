@@ -14,23 +14,18 @@
 #include <timing/timing.h>
 #include <string.h>
 
-#include "deca_device_api.h"
 #include "deca_regs.h"
 #include "platform.h"
 
-#include <pb_encode.h>
-#include <pb_decode.h>
-#include "data_msg.pb.h"
-
-#include <search.h>
-
-#define sleep_ms(ms) k_sleep(K_MSEC(ms))
+#include "common_types.h"
+#include "common_macro.h"
+#include "ranging.h"
 
 /* Example application name and version to display on LCD screen. */
 #define APP_NAME "MRS UWB v0.1"
 const char *buildString = "Build was compiled at " __DATE__ ", " __TIME__ ".";
 
-uint32_t device_id;
+uint32_t DEVICE_ID;
 
 /* Default communication configuration. We use here EVK1000's mode 4. See NOTE 1 below. */
 static dwt_config_t config = {
@@ -46,65 +41,15 @@ static dwt_config_t config = {
     (128 + 8 + 1)    /* SFD timeout (preamble length + 1 + SFD length - PAC size). Used in RX only. */
 };
 
-/* UWB microsecond (uus) to device time unit (dtu, around 15.65 ps) conversion factor.
- * 1 uus = 512 / 499.2 �s and 1 �s = 499.2 * 128 dtu. */
-#define UUS_TO_DWT_TIME 64267
-
-#define SPEED_OF_LIGHT 299702547.0
-
 // GLOBAL VARIABLES
 
 struct k_mutex dwt_mutex;
-struct k_mutex devices_map_mutex;
-
-void *devices_map;
-
-// DATA STRUCTURE DEFINITIONS
-struct ranging_t
-{
-    double distance;
-    double delay;
-    uint64_t tx_timestamp;
-    uint64_t rx_timestamp;
-};
-
-struct device_t
-{
-    uint32_t id;
-    UAV_TYPE uav_type;
-    double GPS[2];
-    struct ranging_t ranging;
-};
-
-struct rx_queue_t
-{
-    const dwt_cb_data_t *cb_data;
-    uint8_t *buffer_rx;
-    uint64_t rx_timestamp;
-    int32_t carrier_integrator;
-};
-
-struct tx_queue_t
-{
-    uint16_t frame_length;
-    uint8_t *frame_buffer;
-    int ranging;
-    uint8_t tx_mode;
-    uint32_t tx_delay;
-    uint64_t *tx_timestamp;
-};
 
 // FUNCTIONS
-void process_beacon(beacon_msg *beacon);
-void process_ranging(ranging_msg *ranging, struct rx_queue_t *queue_data);
-
 static uint64_t get_rx_timestamp_u64(void);
 static uint64_t get_tx_timestamp_u64(void);
 
 // THREADS
-void uwb_beacon_thread(void);
-void uwb_ranging_thread(void);
-
 void uwb_tx_thread(void);
 void uwb_rx_thread(void);
 
@@ -127,8 +72,8 @@ void uwb_rxok(const dwt_cb_data_t *data);
 void dwm_int_callback(const struct device *dev, struct gpio_callback *cb, uint32_t pins);
 
 // QUEUES
-K_FIFO_DEFINE(rx_queue);
-K_FIFO_DEFINE(tx_queue);
+K_FIFO_DEFINE(tx_fifo);
+K_FIFO_DEFINE(rx_fifo);
 
 void main(void)
 {
@@ -137,12 +82,9 @@ void main(void)
     printk("%s\n\r", APP_NAME);
     printk("%s\n\r", buildString);
 
-    device_id = NRF_FICR->DEVICEID[0];
+    DEVICE_ID = NRF_FICR->DEVICEID[0];
 
-    printk("Device ID: 0x%X\n\r", device_id);
-
-    k_mutex_init(&devices_map_mutex);
-    devices_map = um_create();
+    printk("Device ID: 0x%X\n\r", DEVICE_ID);
 
     // SETUP DW1000
     k_mutex_init(&dwt_mutex);
@@ -162,8 +104,8 @@ void main(void)
 
     dwt_configure(&config);
 
-    dwt_settxantennadelay(21900);
-    dwt_setrxantennadelay(21900);
+    dwt_settxantennadelay(21920);
+    dwt_setrxantennadelay(21920);
 
     dwt_setcallbacks(uwb_txdone, uwb_rxok, uwb_rxto, uwb_rxerr);
 
@@ -185,268 +127,6 @@ void main(void)
     return;
 }
 
-// GET RX TIMESTAMP IN 40-BIT FORMAT
-static uint64_t get_rx_timestamp_u64(void)
-{
-    uint8 ts_tab[5];
-    uint64_t ts = 0;
-    int i;
-    dwt_readrxtimestamp(ts_tab);
-    for (i = 4; i >= 0; i--)
-    {
-        ts = (ts << 8) + ts_tab[i];
-    }
-    ts &= (uint64_t)0x000000ffffffffff;
-    return ts;
-}
-
-// GET TX TIMESTAMP IN 40-BIT FORMAT
-static uint64_t get_tx_timestamp_u64(void)
-{
-    uint8 ts_tab[5];
-    uint64_t ts = 0;
-    int i;
-    dwt_readtxtimestamp(ts_tab);
-    for (i = 4; i >= 0; i--)
-    {
-        ts = (ts << 8) + ts_tab[i];
-    }
-    ts &= (uint64_t)0x000000ffffffffff;
-    return ts;
-}
-
-// PROCESS BEACON TYPE MESSAGE
-void process_beacon(beacon_msg *beacon)
-{
-    printf("Received ID: 0x%X at GPS coordinates N%f E%f\n\r",
-           beacon->id,
-           beacon->GPS[0],
-           beacon->GPS[1]);
-
-    // FIND DEVICE WITH THE ID IN MAP
-    struct device_t *device = um_find(devices_map);
-
-    // IF NOT FOUND, CREATE ONE
-    if (device == NULL)
-    {
-        device = k_malloc(sizeof(struct device_t));
-        um_add(devices_map, beacon->id, device);
-    }
-
-    // INITIALIZE THE STRUCTURE
-    device->id = beacon->id;
-    device->uav_type = beacon->uav_type;
-    device->GPS[0] = beacon->GPS[0];
-    device->GPS[1] = beacon->GPS[1];
-
-    k_mutex_lock(&dwt_mutex, K_FOREVER);
-    dwt_rxenable(DWT_START_RX_IMMEDIATE);
-    k_mutex_unlock(&dwt_mutex);
-}
-
-// PROCESS RANGING TYPE OF MESSAGE
-void process_ranging(ranging_msg *ranging, struct rx_queue_t *rx_metadata)
-{
-    switch (ranging->which_data)
-    {
-    case ranging_msg_ranging_init_tag:
-    {
-        // RECIEVED INITIALIZER -> TRANSIM RESPONSE
-        ranging_init_msg *ranging_init = &(ranging->data.ranging_init);
-        if (ranging_init->to_id != device_id)
-        {
-            k_mutex_lock(&dwt_mutex, K_FOREVER);
-            dwt_rxenable(DWT_START_RX_IMMEDIATE);
-            k_mutex_unlock(&dwt_mutex);
-            break;
-        }
-
-        // ALLOCATE MEMORY FOR tx BUFFER AND QUEUE DATA
-        uint8_t *buffer_tx = k_malloc(data_msg_size);
-        struct tx_queue_t *queue_data = k_malloc(sizeof(struct tx_queue_t));
-
-        // CREATE RESPONSE DATA
-        data_msg data_tx = data_msg_init_default;
-        data_tx.which_data = data_msg_ranging_tag;
-        data_tx.data.ranging.which_data = ranging_msg_ranging_response_tag;
-
-        data_tx.data.ranging.data.ranging_response.from_id = device_id;
-        data_tx.data.ranging.data.ranging_response.to_id = ranging_init->from_id;
-
-        // CALCULATE TX TIMESTAMP
-        uint64_t tx_timestamp = rx_metadata->rx_timestamp + (5000 * UUS_TO_DWT_TIME);
-        tx_timestamp &= 0xffffffffffffff00;
-        uint64_t delay = tx_timestamp - rx_metadata->rx_timestamp;
-
-        data_tx.data.ranging.data.ranging_response.delay = delay;
-
-        // ENCODE THE MESSAGE
-        pb_ostream_t stream = pb_ostream_from_buffer(buffer_tx, data_msg_size);
-        pb_encode(&stream, data_msg_fields, &data_tx);
-        int msg_length = stream.bytes_written;
-
-        // INITIALIZE QUEUE DATA
-        queue_data->frame_length = msg_length;
-        queue_data->frame_buffer = buffer_tx;
-
-        queue_data->ranging = 1;
-        queue_data->tx_delay = (uint32_t)(tx_timestamp >> 8);
-        queue_data->tx_mode = DWT_START_TX_DELAYED | DWT_RESPONSE_EXPECTED;
-
-        queue_data->tx_timestamp = NULL;
-
-        // SEND DATA TO TX QUEUE
-        k_fifo_put(&tx_queue, queue_data);
-
-        break;
-    }
-    case ranging_msg_ranging_response_tag:
-    {
-        // RESPONSE MESSAGE RECEIVED
-        k_mutex_lock(&dwt_mutex, K_FOREVER);
-        dwt_rxenable(DWT_START_RX_IMMEDIATE);
-        k_mutex_unlock(&dwt_mutex);
-
-        ranging_response_msg *ranging_response = &(ranging->data.ranging_response);
-        if (ranging_response->to_id != device_id)
-            break;
-
-        // RETRIEVE DATA FROM MAP
-        struct device_t *device = (struct device_t *)um_find(devices_map, ranging_response->from_id);
-        if (device == NULL)
-            break;
-
-        double clockOffsetRatio = rx_metadata->carrier_integrator * (FREQ_OFFSET_MULTIPLIER * HERTZ_TO_PPM_MULTIPLIER_CHAN_5 / 1.0e6);
-
-        // CALCULATE DISTANCE
-        uint64_t rx_timestamp = rx_metadata->rx_timestamp;
-        uint64_t tx_timestamp = device->ranging.tx_timestamp;
-
-        uint64_t timespan = rx_timestamp - tx_timestamp;
-        double diff = timespan - (1 - clockOffsetRatio) * ranging_response->delay;
-
-        // double tof = ((diff / 2.) * DWT_TIME_UNITS) - 1.28156358e-7;
-        double tof = ((diff / 2.) * DWT_TIME_UNITS);
-        double dist = tof * SPEED_OF_LIGHT;
-        printf("Distance to id 0x%X: %g\n\r", ranging_response->from_id, dist);
-        break;
-    }
-    default:
-        printk("Unknown message type\n\r");
-    }
-}
-
-// BEACON THREAD
-void uwb_beacon_thread(void)
-{
-    // SUSPEND THREAD FOR NOW
-    k_tid_t thread_id = k_current_get();
-    k_thread_suspend(thread_id);
-
-    printk("Starting beacon thread\n\r");
-
-    // INIT MESSAGE
-    data_msg data_tx = data_msg_init_default;
-
-    data_tx.which_data = data_msg_beacon_tag;
-    data_tx.data.beacon.id = device_id;
-    data_tx.data.beacon.uav_type = UAV_TYPE_DEFAULT;
-    data_tx.data.beacon.GPS[0] = 50.4995652542;
-    data_tx.data.beacon.GPS[1] = 13.4499037391;
-
-    while (1)
-    {
-        printk("Beacon!\n\r");
-
-        // ALLOCATE MEMORY FOR BUFFER AND QUEUE DATA
-        uint8_t *buffer_tx = k_malloc(data_msg_size);
-        struct tx_queue_t *queue_data = k_malloc(sizeof(struct tx_queue_t));
-
-        // ENCODE THE MESSAGE
-        pb_ostream_t stream = pb_ostream_from_buffer(buffer_tx, data_msg_size);
-        pb_encode(&stream, data_msg_fields, &data_tx);
-        int msg_length = stream.bytes_written;
-
-        // SET QUEUE DATA
-        queue_data->frame_length = msg_length;
-        queue_data->frame_buffer = buffer_tx;
-
-        queue_data->ranging = 0;
-        queue_data->tx_delay = 0;
-        queue_data->tx_mode = DWT_START_TX_IMMEDIATE | DWT_RESPONSE_EXPECTED;
-
-        queue_data->tx_timestamp = NULL;
-
-        // SEND DATA TO QUEUE
-        k_fifo_put(&tx_queue, queue_data);
-
-        sleep_ms(10000);
-    }
-}
-
-// RANGING THREAD
-void uwb_ranging_thread(void)
-{
-    k_tid_t thread_id = k_current_get();
-    k_thread_suspend(thread_id);
-
-    printk("Ranging thread started\n\r");
-
-    while (1)
-    {
-        int size = um_size(devices_map);
-
-        if (size < 1)
-        {
-            sleep_ms(1000);
-            continue;
-        }
-
-        uint32_t keys[size];
-        um_get_keys(devices_map, keys);
-
-        // CYCLE THROUGH ALL THE DEVICES IN MAP
-        for (int dev = 0; dev < size; dev++)
-        {
-            struct device_t *device = (struct device_t *)um_find(devices_map, keys[dev]);
-            if (device == NULL)
-                continue;
-
-            // ALLOCATE MEMORY FOR BUFFER AND QUEUE DATA
-            uint8_t *buffer_tx = k_malloc(data_msg_size);
-            struct tx_queue_t *queue_data = k_malloc(sizeof(struct tx_queue_t));
-
-            // SET MESSAGE DATA
-            data_msg data_tx = data_msg_init_default;
-
-            data_tx.which_data = data_msg_ranging_tag;
-            data_tx.data.ranging.which_data = ranging_msg_ranging_init_tag;
-            data_tx.data.ranging.data.ranging_init.from_id = device_id;
-            data_tx.data.ranging.data.ranging_init.to_id = device->id;
-
-            // ENCODE THE DATA TO BUFFER
-            pb_ostream_t stream = pb_ostream_from_buffer(buffer_tx, data_msg_size);
-            pb_encode(&stream, data_msg_fields, &data_tx);
-            int msg_length = stream.bytes_written;
-
-            // SET QUEUE DATA
-            queue_data->frame_length = msg_length;
-            queue_data->frame_buffer = buffer_tx;
-
-            queue_data->ranging = 1;
-            queue_data->tx_delay = 0;
-            queue_data->tx_mode = DWT_START_TX_IMMEDIATE | DWT_RESPONSE_EXPECTED;
-
-            queue_data->tx_timestamp = &(device->ranging.tx_timestamp);
-
-            // SEND DATA TO QUEUE
-            k_fifo_put(&tx_queue, queue_data);
-
-            sleep_ms(500);
-        }
-    }
-}
-
 // RECIEVE THREAD
 void uwb_rx_thread(void)
 {
@@ -462,25 +142,34 @@ void uwb_rx_thread(void)
     while (1)
     {
         // RECEIVE DATA FROM INTERRUPT THROUGH QUEUE
-        struct rx_queue_t *data = (struct rx_queue_t *)k_fifo_get(&rx_queue, K_FOREVER);
+        struct rx_queue_t *data = (struct rx_queue_t *)k_fifo_get(&rx_fifo, K_FOREVER);
         data_msg data_rx;
 
         // DECODE THE DATA
         pb_istream_t stream = pb_istream_from_buffer(data->buffer_rx, data->cb_data->datalength);
         pb_decode(&stream, data_msg_fields, &data_rx);
 
+        int status = SUCCESS;
+
         // PROCESS THE MESSAGE
         switch (data_rx.which_data)
         {
         case data_msg_beacon_tag:
-            process_beacon(&data_rx.data.beacon);
+            status = process_beacon(&data_rx.data.beacon);
             break;
         case data_msg_ranging_tag:
-            process_ranging(&data_rx.data.ranging, data);
+            status = process_ranging(&data_rx.data.ranging, data);
             break;
         default:
             printk("Unknown message\n\r");
             break;
+        }
+
+        if (status == RX_ENABLE)
+        {
+            k_mutex_lock(&dwt_mutex, K_FOREVER);
+            dwt_rxenable(DWT_START_RX_IMMEDIATE);
+            k_mutex_unlock(&dwt_mutex);
         }
 
         // FREE QUEUE DATA
@@ -503,7 +192,7 @@ void uwb_tx_thread(void)
     while (1)
     {
         // GET DATA FOR TRANSMITTING THROUGH QUEUE
-        struct tx_queue_t *data_tx = (struct tx_queue_t *)k_fifo_get(&tx_queue, K_FOREVER);
+        struct tx_queue_t *data_tx = (struct tx_queue_t *)k_fifo_get(&tx_fifo, K_FOREVER);
 
         k_mutex_lock(&dwt_mutex, K_FOREVER);
 
@@ -520,27 +209,15 @@ void uwb_tx_thread(void)
         {
             dwt_setdelayedtrxtime(data_tx->tx_delay);
         }
+
         // START TRANSMITTING
-        int status = dwt_starttx(data_tx->tx_mode);
-
-        if (status == DWT_SUCCESS)
+        if ((dwt_starttx(data_tx->tx_mode) == DWT_SUCCESS) && (k_condvar_wait(&tx_condvar, &dwt_mutex, K_MSEC(10)) == 0))
         {
-            // SLEEP UNTIL TIME OR WAKE UP BY CALL FROM ISR
-            int status = k_condvar_wait(&tx_condvar, &dwt_mutex, K_MSEC(100));
-
-            if (status != EAGAIN)
+            uint64_t *timestamp_ptr = data_tx->tx_timestamp;
+            if (timestamp_ptr != NULL)
             {
-                uint64_t *timestamp_ptr = data_tx->tx_timestamp;
-                if (timestamp_ptr != NULL)
-                {
-                    uint64_t timestamp = get_tx_timestamp_u64();
-                    *timestamp_ptr = timestamp;
-                }
-            }
-            else
-            {
-                dwt_forcetrxoff();
-                dwt_rxenable(DWT_START_RX_IMMEDIATE);
+                uint64_t timestamp = get_tx_timestamp_u64();
+                *timestamp_ptr = timestamp;
             }
         }
         else
@@ -548,6 +225,7 @@ void uwb_tx_thread(void)
             dwt_forcetrxoff();
             dwt_rxenable(DWT_START_RX_IMMEDIATE);
         }
+
         // UNLOCK THE MTX AND FREE THE DATA
         k_mutex_unlock(&dwt_mutex);
         k_free(data_tx->frame_buffer);
@@ -587,7 +265,9 @@ void uwb_rxok(const dwt_cb_data_t *data)
     queue->rx_timestamp = rx_ts;
     queue->carrier_integrator = integrator;
 
-    k_fifo_put(&rx_queue, queue);
+    k_fifo_put(&rx_fifo, queue);
+
+    return;
 }
 
 void dwt_isr_thread(void)
@@ -605,4 +285,34 @@ void dwm_int_callback(const struct device *dev, struct gpio_callback *cb, uint32
 {
     k_wakeup(dwt_isr_thr);
     return;
+}
+
+// GET RX TIMESTAMP IN 40-BIT FORMAT
+static uint64_t get_rx_timestamp_u64(void)
+{
+    uint8 ts_tab[5];
+    uint64_t ts = 0;
+    int i;
+    dwt_readrxtimestamp(ts_tab);
+    for (i = 4; i >= 0; i--)
+    {
+        ts = (ts << 8) + ts_tab[i];
+    }
+    ts &= (uint64_t)0x000000ffffffffff;
+    return ts;
+}
+
+// GET TX TIMESTAMP IN 40-BIT FORMAT
+static uint64_t get_tx_timestamp_u64(void)
+{
+    uint8 ts_tab[5];
+    uint64_t ts = 0;
+    int i;
+    dwt_readtxtimestamp(ts_tab);
+    for (i = 4; i >= 0; i--)
+    {
+        ts = (ts << 8) + ts_tab[i];
+    }
+    ts &= (uint64_t)0x000000ffffffffff;
+    return ts;
 }

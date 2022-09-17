@@ -7,7 +7,7 @@ find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(hello_world)
 
 # add_subdirectory(decadriver)
-include_directories(decadriver platform protocol inc)
+include_directories(decadriver platform protocol inc ranging)
 
 target_sources(app PRIVATE 
     src/main.c
@@ -18,7 +18,7 @@ target_sources(app PRIVATE
     decadriver/deca_device.c
     decadriver/deca_params_init.c
     protocol/data_msg.pb.c
-    unordered_map.cpp
+    ranging/ranging.cpp
 )
 
 set_property(TARGET app PROPERTY CXX_STANDARD 20)
