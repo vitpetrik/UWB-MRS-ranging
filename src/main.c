@@ -25,7 +25,8 @@
 #define APP_NAME "MRS UWB v0.1"
 const char *buildString = "Build was compiled at " __DATE__ ", " __TIME__ ".";
 
-uint32_t DEVICE_ID;
+uint16_t DEVICE_ID;
+uint8_t SEQ_NUM;
 
 /* Default communication configuration. We use here EVK1000's mode 4. See NOTE 1 below. */
 static dwt_config_t config = {
@@ -55,13 +56,13 @@ void uwb_rx_thread(void);
 
 void dwt_isr_thread(void);
 
-K_THREAD_DEFINE(uwb_beacon_thr, 2048, uwb_beacon_thread, NULL, NULL, NULL, 5, 0, 0);
-K_THREAD_DEFINE(uwb_ranging_thr, 2048, uwb_ranging_thread, NULL, NULL, NULL, 5, 0, 0);
+K_THREAD_DEFINE(uwb_beacon_thr, 4096, uwb_beacon_thread, NULL, NULL, NULL, 5, 0, 0);
+K_THREAD_DEFINE(uwb_ranging_thr, 4096, uwb_ranging_thread, NULL, NULL, NULL, 5, 0, 0);
 
-K_THREAD_DEFINE(uwb_rx_thr, 2048, uwb_rx_thread, NULL, NULL, NULL, -2, 0, 0);
-K_THREAD_DEFINE(uwb_tx_thr, 2048, uwb_tx_thread, NULL, NULL, NULL, -1, 0, 0);
+K_THREAD_DEFINE(uwb_rx_thr, 4096, uwb_rx_thread, NULL, NULL, NULL, -2, 0, 0);
+K_THREAD_DEFINE(uwb_tx_thr, 4096, uwb_tx_thread, NULL, NULL, NULL, -1, 0, 0);
 
-K_THREAD_DEFINE(dwt_isr_thr, 2048, dwt_isr_thread, NULL, NULL, NULL, -1, 0, 0);
+K_THREAD_DEFINE(dwt_isr_thr, 4096, dwt_isr_thread, NULL, NULL, NULL, -1, 0, 0);
 
 // CALLBACKS
 void uwb_txdone(const dwt_cb_data_t *data);
@@ -78,13 +79,13 @@ K_FIFO_DEFINE(rx_fifo);
 void main(void)
 {
     // INITIALIZE
+    printf("%s\n\r", APP_NAME);
+    printf("%s\n\r", buildString);
 
-    printk("%s\n\r", APP_NAME);
-    printk("%s\n\r", buildString);
+    DEVICE_ID = NRF_FICR->DEVICEID[0] >> 16;
+    SEQ_NUM = 0;
 
-    DEVICE_ID = NRF_FICR->DEVICEID[0];
-
-    printk("Device ID: 0x%X\n\r", DEVICE_ID);
+    printf("Device ID: 0x%X\n\r", DEVICE_ID);
 
     // SETUP DW1000
     k_mutex_init(&dwt_mutex);
@@ -95,7 +96,7 @@ void main(void)
 
     if (dwt_initialise(DWT_LOADUCODE) == DWT_ERROR)
     {
-        printk("INIT FAILED");
+        printf("INIT FAILED");
         while (1)
         {
         };
@@ -103,6 +104,12 @@ void main(void)
     spi_set_rate_high();
 
     dwt_configure(&config);
+
+    dwt_setaddress16(DEVICE_ID);
+    dwt_setpanid(0xDECA);
+
+    dwt_enableframefilter(DWT_FF_RSVD_EN | DWT_FF_DATA_EN);
+    dwt_setdblrxbuffmode(1);
 
     dwt_settxantennadelay(21920);
     dwt_setrxantennadelay(21920);
@@ -112,16 +119,12 @@ void main(void)
     dwt_setinterrupt(DWT_INT_TFRS | DWT_INT_RFCG, 1);
     k_mutex_unlock(&dwt_mutex);
 
-    printk("Settings done!\n\r");
+    printf("Settings done!\n\r");
 
     // START THE THREADS
-
     k_thread_resume(uwb_rx_thr);
-    sleep_ms(100);
     k_thread_resume(uwb_tx_thr);
-    sleep_ms(100);
     k_thread_resume(uwb_beacon_thr);
-    sleep_ms(100);
     k_thread_resume(uwb_ranging_thr);
 
     return;
@@ -137,40 +140,52 @@ void uwb_rx_thread(void)
     dwt_rxenable(DWT_START_RX_IMMEDIATE);
     k_mutex_unlock(&dwt_mutex);
 
-    printk("Rx thread started\n\r");
+    printf("Rx thread started\n\r");
 
     while (1)
     {
         // RECEIVE DATA FROM INTERRUPT THROUGH QUEUE
+        int status = RX_ENABLE;
+
         struct rx_queue_t *data = (struct rx_queue_t *)k_fifo_get(&rx_fifo, K_FOREVER);
         data_msg data_rx;
 
-        // DECODE THE DATA
-        pb_istream_t stream = pb_istream_from_buffer(data->buffer_rx, data->cb_data->datalength);
-        pb_decode(&stream, data_msg_fields, &data_rx);
+        uint8_t *buffer_rx = data->buffer_rx;
 
-        int status = SUCCESS;
+        uint16_t frame_ctrl;
+        memcpy(&frame_ctrl, buffer_rx, sizeof(uint16_t));
+        buffer_rx += sizeof(uint16_t);
 
-        // PROCESS THE MESSAGE
-        switch (data_rx.which_data)
+        if (frame_ctrl & (DATA | MRS_BEACON))
         {
-        case data_msg_beacon_tag:
-            status = process_beacon(&data_rx.data.beacon);
-            break;
-        case data_msg_ranging_tag:
-            status = process_ranging(&data_rx.data.ranging, data);
-            break;
-        default:
-            printk("Unknown message\n\r");
-            break;
+            // SEQUENCE NUMBER
+            buffer_rx += sizeof(uint8_t);
+
+            uint16_t pan_id;
+            memcpy(&pan_id, buffer_rx, sizeof(uint16_t));
+            buffer_rx += sizeof(uint16_t);
+
+            uint16_t destination_id;
+            memcpy(&destination_id, buffer_rx, sizeof(uint16_t));
+            buffer_rx += sizeof(uint16_t);
+
+            uint16_t source_id;
+            memcpy(&source_id, buffer_rx, sizeof(uint16_t));
+            buffer_rx += sizeof(uint16_t);
+
+            // DECODE THE DATA
+            pb_istream_t stream = pb_istream_from_buffer(buffer_rx, data->cb_data->datalength - 9);
+            pb_decode(&stream, data_msg_fields, &data_rx);
+
+            status = rx_message(data_rx.which_data, source_id, (const void *)&(data_rx.data), data);
         }
 
-        if (status == RX_ENABLE)
-        {
-            k_mutex_lock(&dwt_mutex, K_FOREVER);
-            dwt_rxenable(DWT_START_RX_IMMEDIATE);
-            k_mutex_unlock(&dwt_mutex);
-        }
+        // if (status == RX_ENABLE)
+        // {
+        //     k_mutex_lock(&dwt_mutex, K_FOREVER);
+        //     dwt_rxenable(DWT_START_RX_IMMEDIATE);
+        //     k_mutex_unlock(&dwt_mutex);
+        // }
 
         // FREE QUEUE DATA
         k_free(data->buffer_rx);
@@ -186,7 +201,7 @@ void uwb_tx_thread(void)
     k_tid_t thread_id = k_current_get();
     k_thread_suspend(thread_id);
 
-    printk("Tx thread started\n\r");
+    printf("Tx thread started\n\r");
     k_condvar_init(&tx_condvar);
 
     while (1)
@@ -198,22 +213,22 @@ void uwb_tx_thread(void)
 
         // TURN OFF RECEIVER
         if (dwt_read32bitreg(SYS_STATE_ID) & 0x0f00)
-            dwt_forcetrxoff();
+            dwt_write8bitoffsetreg(SYS_CTRL_ID, SYS_CTRL_OFFSET, (uint8)SYS_CTRL_TRXOFF); // Disable the radio
 
         // WRITE DATA TO TX BUFFER
         dwt_writetxdata(data_tx->frame_length, data_tx->frame_buffer, 0);
-        dwt_writetxfctrl(data_tx->frame_length, 0, data_tx->ranging);
+        dwt_writetxfctrl(data_tx->frame_length, 0, data_tx->tx_details.ranging);
 
         // SET DELAYED TX TIMESTAMP
-        if (data_tx->tx_mode & DWT_START_TX_DELAYED)
+        if (data_tx->tx_details.tx_mode & DWT_START_TX_DELAYED)
         {
-            dwt_setdelayedtrxtime(data_tx->tx_delay);
+            dwt_setdelayedtrxtime(data_tx->tx_details.tx_delay);
         }
 
         // START TRANSMITTING
-        if ((dwt_starttx(data_tx->tx_mode) == DWT_SUCCESS) && (k_condvar_wait(&tx_condvar, &dwt_mutex, K_MSEC(10)) == 0))
+        if ((dwt_starttx(data_tx->tx_details.tx_mode) == DWT_SUCCESS) && (k_condvar_wait(&tx_condvar, &dwt_mutex, K_MSEC(10)) == 0))
         {
-            uint64_t *timestamp_ptr = data_tx->tx_timestamp;
+            uint64_t *timestamp_ptr = data_tx->tx_details.tx_timestamp;
             if (timestamp_ptr != NULL)
             {
                 uint64_t timestamp = get_tx_timestamp_u64();
@@ -251,13 +266,14 @@ void uwb_rxok(const dwt_cb_data_t *data)
 {
     // INIT DATA
     uint16_t msg_length = data->datalength;
-    uint8_t *buffer_rx = k_malloc(msg_length);
     struct rx_queue_t *queue = k_malloc(sizeof(struct rx_queue_t));
+    uint8_t *buffer_rx = k_malloc(msg_length);
 
     // READ THE DATA AND ENABLE RX
-    dwt_readrxdata(buffer_rx, msg_length, 0);
-    uint64_t rx_ts = get_rx_timestamp_u64();
     int32_t integrator = dwt_readcarrierintegrator();
+    dwt_rxenable(DWT_START_RX_IMMEDIATE | DWT_NO_SYNC_PTRS);
+    uint64_t rx_ts = get_rx_timestamp_u64();
+    dwt_readrxdata(buffer_rx, msg_length, 0);
 
     // INIT QUEUE DATA AND SEND TO RX THREAD THROUGH QUEUE
     queue->cb_data = data;
@@ -270,11 +286,13 @@ void uwb_rxok(const dwt_cb_data_t *data)
     return;
 }
 
+K_SEM_DEFINE(isr_semaphore, 0, 2);
+
 void dwt_isr_thread(void)
 {
     while (1)
     {
-        k_sleep(K_FOREVER);
+        k_sem_take(&isr_semaphore, K_FOREVER);
         k_mutex_lock(&dwt_mutex, K_FOREVER);
         dwt_isr();
         k_mutex_unlock(&dwt_mutex);
@@ -283,7 +301,7 @@ void dwt_isr_thread(void)
 
 void dwm_int_callback(const struct device *dev, struct gpio_callback *cb, uint32_t pins)
 {
-    k_wakeup(dwt_isr_thr);
+    k_sem_give(&isr_semaphore);
     return;
 }
 

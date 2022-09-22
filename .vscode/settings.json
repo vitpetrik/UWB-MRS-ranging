@@ -2,14 +2,15 @@
     "nrf-connect.applications": [
         "${workspaceFolder}"
     ],
-    "nrf-connect.topdir": "${nrf-connect.sdk:2.0.0}",
-    "nrf-connect.toolchain.path": "${nrf-connect.toolchain:2.0.0}",
+    "nrf-connect.topdir": "${nrf-connect.sdk:2.1.0}",
+    "nrf-connect.toolchain.path": "${nrf-connect.toolchain:2.1.0}",
     "files.associations": {
         "deca_device_api.h": "c",
         "beacon.pb.h": "c",
         "zephyr.h": "c",
         "kernel.h": "c",
-        "pb.h": "c"
+        "pb.h": "c",
+        "common_types.h": "c"
     },
     "cortex-debug.variableUseNaturalFormat": false
 }

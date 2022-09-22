@@ -14,33 +14,21 @@ enum UAV_TYPE {
 };
 
 message beacon_msg {
-    uint32 id = 1;
     UAV_TYPE uav_type = 2;
     repeated double GPS = 3 [(nanopb).max_count = 2, (nanopb).fixed_count = true];
 }
 
-message ranging_init_msg {
-    uint32 from_id = 1;
-    uint32 to_id = 2;
-}
+message ranging_init_msg {}
 
 message ranging_response_msg {
-    uint32 from_id = 1;
-    uint32 to_id = 2;
-    uint64 delay = 3;
-}
-
-message ranging_msg {
-    oneof data {
-        ranging_init_msg ranging_init = 1;
-        ranging_response_msg ranging_response = 2;
-    }
+    uint32 delay = 1;
 }
 
 message data_msg {
     oneof data {
         beacon_msg beacon = 1;
-        ranging_msg ranging = 2;
+        ranging_init_msg ranging_init = 2;
+        ranging_response_msg ranging_response = 3;
     };
-    repeated bool CRC = 3 [(nanopb).max_count = 2, (nanopb).fixed_count = true];
+    repeated bool CRC = 10 [(nanopb).max_count = 2, (nanopb).fixed_count = true];
 }

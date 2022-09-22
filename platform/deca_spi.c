@@ -25,10 +25,11 @@
 struct device *spi = DEVICE_DT_GET(DT_NODELABEL(spi2));
 
 const struct spi_cs_control cs_ctrl = {
-    .gpio_dev = DEVICE_DT_GET(DT_NODELABEL(gpio0)),
+    .gpio = {
+        .port = DEVICE_DT_GET(DT_NODELABEL(gpio0)),
+        .pin = 17,
+        .dt_flags = GPIO_ACTIVE_LOW},
     .delay = 0,
-    .gpio_pin = 17,
-    .gpio_dt_flags = GPIO_ACTIVE_LOW,
 };
 
 struct spi_config spi_cfg = {
@@ -46,9 +47,9 @@ struct spi_config spi_cfg = {
 int writetospi(uint16 headerLength, const uint8 *headerBuffer, uint32 bodylength, const uint8 *bodyBuffer)
 {
     struct spi_buf spi_buf_tx[] = {
-        {.buf = headerBuffer,
+        {.buf = (uint8_t*) headerBuffer,
          .len = headerLength},
-        {.buf = bodyBuffer,
+        {.buf = (uint8_t*) bodyBuffer,
          .len = bodylength}};
 
     struct spi_buf spi_buf_rx[] = {
@@ -82,7 +83,7 @@ int readfromspi(uint16 headerLength, const uint8 *headerBuffer, uint32 readlengt
     uint8 empty_buffer[readlength];
     memset(empty_buffer, 0, readlength);
     const struct spi_buf spi_buf_tx[] = {
-        {.buf = headerBuffer,
+        {.buf = (uint8_t*) headerBuffer,
          .len = headerLength},
         {.buf = empty_buffer,
          .len = readlength}};

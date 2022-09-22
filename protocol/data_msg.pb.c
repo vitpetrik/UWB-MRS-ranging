@@ -15,9 +15,6 @@ PB_BIND(ranging_init_msg, ranging_init_msg, AUTO)
 PB_BIND(ranging_response_msg, ranging_response_msg, AUTO)
 
 
-PB_BIND(ranging_msg, ranging_msg, AUTO)
-
-
 PB_BIND(data_msg, data_msg, AUTO)
 
 

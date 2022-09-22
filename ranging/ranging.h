@@ -29,8 +29,11 @@ void uwb_beacon_thread(void);
 void uwb_ranging_thread(void);
 
 // FUNCTIONS
-int process_beacon(beacon_msg *beacon);
-int process_ranging(ranging_msg *ranging, struct rx_queue_t *queue_data);
+int rx_message(const uint32_t msg_type, const uint16_t source_id, const void *msg, struct rx_queue_t *queue_data);
+
+int rx_beacon(const uint16_t source_id, beacon_msg *beacon);
+int rx_ranging_init(const uint16_t source_id, ranging_init_msg *msg, struct rx_queue_t *queue_data);
+int rx_ranging_response(const uint16_t source_id, ranging_response_msg *msg, struct rx_queue_t *queue_data);
 
 #ifdef __cplusplus
 }
