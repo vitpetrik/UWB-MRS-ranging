@@ -4,31 +4,11 @@
 syntax = "proto3";
 import "nanopb.proto";
 
-enum MSG_TYPE {
-    BEACON = 0;
-    RANGING = 1;
-}
-
-enum UAV_TYPE {
-    DEFAULT = 0;
-};
-
 message beacon_msg {
-    UAV_TYPE uav_type = 2;
-    repeated double GPS = 3 [(nanopb).max_count = 2, (nanopb).fixed_count = true];
+    uint32 uav_type = 1;
+    repeated double GPS = 2 [(nanopb).max_count = 2, (nanopb).fixed_count = true];
 }
-
-message ranging_init_msg {}
 
 message ranging_response_msg {
     uint32 delay = 1;
-}
-
-message data_msg {
-    oneof data {
-        beacon_msg beacon = 1;
-        ranging_init_msg ranging_init = 2;
-        ranging_response_msg ranging_response = 3;
-    };
-    repeated bool CRC = 10 [(nanopb).max_count = 2, (nanopb).fixed_count = true];
 }

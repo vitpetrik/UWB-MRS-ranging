@@ -9,23 +9,9 @@
 #error Regenerate this file with the current version of nanopb generator.
 #endif
 
-/* Enum definitions */
-typedef enum _MSG_TYPE { 
-    MSG_TYPE_BEACON = 0, 
-    MSG_TYPE_RANGING = 1 
-} MSG_TYPE;
-
-typedef enum _UAV_TYPE { 
-    UAV_TYPE_DEFAULT = 0 
-} UAV_TYPE;
-
 /* Struct definitions */
-typedef struct _ranging_init_msg { 
-    char dummy_field;
-} ranging_init_msg;
-
 typedef struct _beacon_msg { 
-    UAV_TYPE uav_type;
+    uint32_t uav_type;
     double GPS[2];
 } beacon_msg;
 
@@ -33,93 +19,43 @@ typedef struct _ranging_response_msg {
     uint32_t delay;
 } ranging_response_msg;
 
-typedef struct _data_msg { 
-    pb_size_t which_data;
-    union {
-        beacon_msg beacon;
-        ranging_init_msg ranging_init;
-        ranging_response_msg ranging_response;
-    } data;
-    bool CRC[2];
-} data_msg;
-
-
-/* Helper constants for enums */
-#define _MSG_TYPE_MIN MSG_TYPE_BEACON
-#define _MSG_TYPE_MAX MSG_TYPE_RANGING
-#define _MSG_TYPE_ARRAYSIZE ((MSG_TYPE)(MSG_TYPE_RANGING+1))
-
-#define _UAV_TYPE_MIN UAV_TYPE_DEFAULT
-#define _UAV_TYPE_MAX UAV_TYPE_DEFAULT
-#define _UAV_TYPE_ARRAYSIZE ((UAV_TYPE)(UAV_TYPE_DEFAULT+1))
-
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 /* Initializer values for message structs */
-#define beacon_msg_init_default                  {_UAV_TYPE_MIN, {0, 0}}
-#define ranging_init_msg_init_default            {0}
+#define beacon_msg_init_default                  {0, {0, 0}}
 #define ranging_response_msg_init_default        {0}
-#define data_msg_init_default                    {0, {beacon_msg_init_default}, {0, 0}}
-#define beacon_msg_init_zero                     {_UAV_TYPE_MIN, {0, 0}}
-#define ranging_init_msg_init_zero               {0}
+#define beacon_msg_init_zero                     {0, {0, 0}}
 #define ranging_response_msg_init_zero           {0}
-#define data_msg_init_zero                       {0, {beacon_msg_init_zero}, {0, 0}}
 
 /* Field tags (for use in manual encoding/decoding) */
-#define beacon_msg_uav_type_tag                  2
-#define beacon_msg_GPS_tag                       3
+#define beacon_msg_uav_type_tag                  1
+#define beacon_msg_GPS_tag                       2
 #define ranging_response_msg_delay_tag           1
-#define data_msg_beacon_tag                      1
-#define data_msg_ranging_init_tag                2
-#define data_msg_ranging_response_tag            3
-#define data_msg_CRC_tag                         10
 
 /* Struct field encoding specification for nanopb */
 #define beacon_msg_FIELDLIST(X, a) \
-X(a, STATIC,   SINGULAR, UENUM,    uav_type,          2) \
-X(a, STATIC,   FIXARRAY, DOUBLE,   GPS,               3)
+X(a, STATIC,   SINGULAR, UINT32,   uav_type,          1) \
+X(a, STATIC,   FIXARRAY, DOUBLE,   GPS,               2)
 #define beacon_msg_CALLBACK NULL
 #define beacon_msg_DEFAULT NULL
-
-#define ranging_init_msg_FIELDLIST(X, a) \
-
-#define ranging_init_msg_CALLBACK NULL
-#define ranging_init_msg_DEFAULT NULL
 
 #define ranging_response_msg_FIELDLIST(X, a) \
 X(a, STATIC,   SINGULAR, UINT32,   delay,             1)
 #define ranging_response_msg_CALLBACK NULL
 #define ranging_response_msg_DEFAULT NULL
 
-#define data_msg_FIELDLIST(X, a) \
-X(a, STATIC,   ONEOF,    MESSAGE,  (data,beacon,data.beacon),   1) \
-X(a, STATIC,   ONEOF,    MESSAGE,  (data,ranging_init,data.ranging_init),   2) \
-X(a, STATIC,   ONEOF,    MESSAGE,  (data,ranging_response,data.ranging_response),   3) \
-X(a, STATIC,   FIXARRAY, BOOL,     CRC,              10)
-#define data_msg_CALLBACK NULL
-#define data_msg_DEFAULT NULL
-#define data_msg_data_beacon_MSGTYPE beacon_msg
-#define data_msg_data_ranging_init_MSGTYPE ranging_init_msg
-#define data_msg_data_ranging_response_MSGTYPE ranging_response_msg
-
 extern const pb_msgdesc_t beacon_msg_msg;
-extern const pb_msgdesc_t ranging_init_msg_msg;
 extern const pb_msgdesc_t ranging_response_msg_msg;
-extern const pb_msgdesc_t data_msg_msg;
 
 /* Defines for backwards compatibility with code written before nanopb-0.4.0 */
 #define beacon_msg_fields &beacon_msg_msg
-#define ranging_init_msg_fields &ranging_init_msg_msg
 #define ranging_response_msg_fields &ranging_response_msg_msg
-#define data_msg_fields &data_msg_msg
 
 /* Maximum encoded size of messages (where known) */
-#define beacon_msg_size                          20
-#define data_msg_size                            26
-#define ranging_init_msg_size                    0
+#define beacon_msg_size                          24
 #define ranging_response_msg_size                6
 
 #ifdef __cplusplus

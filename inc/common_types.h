@@ -55,7 +55,7 @@ struct ranging_t
 struct device_t
 {
     uint16_t id;
-    UAV_TYPE uav_type;
+    uint8_t uav_type;
     double GPS[2];
     struct ranging_t ranging;
 };

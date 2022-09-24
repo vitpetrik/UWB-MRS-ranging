@@ -28,6 +28,13 @@ const char *buildString = "Build was compiled at " __DATE__ ", " __TIME__ ".";
 uint16_t DEVICE_ID;
 uint8_t SEQ_NUM;
 
+// LEDS
+
+static const struct gpio_dt_spec led0red = GPIO_DT_SPEC_GET(DT_NODELABEL(led0_red), gpios);
+static const struct gpio_dt_spec led1green = GPIO_DT_SPEC_GET(DT_NODELABEL(led1_green), gpios);
+static const struct gpio_dt_spec led2red = GPIO_DT_SPEC_GET(DT_NODELABEL(led2_red), gpios);
+static const struct gpio_dt_spec led3blue = GPIO_DT_SPEC_GET(DT_NODELABEL(led3_blue), gpios);
+
 /* Default communication configuration. We use here EVK1000's mode 4. See NOTE 1 below. */
 static dwt_config_t config = {
     5,               /* Channel number. */
@@ -56,13 +63,13 @@ void uwb_rx_thread(void);
 
 void dwt_isr_thread(void);
 
-K_THREAD_DEFINE(uwb_beacon_thr, 4096, uwb_beacon_thread, NULL, NULL, NULL, 5, 0, 0);
-K_THREAD_DEFINE(uwb_ranging_thr, 4096, uwb_ranging_thread, NULL, NULL, NULL, 5, 0, 0);
+K_THREAD_DEFINE(uwb_beacon_thr, 1024, uwb_beacon_thread, NULL, NULL, NULL, 5, 0, 0);
+K_THREAD_DEFINE(uwb_ranging_thr, 1024, uwb_ranging_thread, NULL, NULL, NULL, 5, 0, 0);
 
-K_THREAD_DEFINE(uwb_rx_thr, 4096, uwb_rx_thread, NULL, NULL, NULL, -2, 0, 0);
-K_THREAD_DEFINE(uwb_tx_thr, 4096, uwb_tx_thread, NULL, NULL, NULL, -1, 0, 0);
+K_THREAD_DEFINE(uwb_rx_thr, 1024, uwb_rx_thread, NULL, NULL, NULL, -2, 0, 0);
+K_THREAD_DEFINE(uwb_tx_thr, 1024, uwb_tx_thread, NULL, NULL, NULL, -1, 0, 0);
 
-K_THREAD_DEFINE(dwt_isr_thr, 4096, dwt_isr_thread, NULL, NULL, NULL, -1, 0, 0);
+K_THREAD_DEFINE(dwt_isr_thr, 1024, dwt_isr_thread, NULL, NULL, NULL, -1, 0, 0);
 
 // CALLBACKS
 void uwb_txdone(const dwt_cb_data_t *data);
@@ -87,6 +94,11 @@ void main(void)
 
     printf("Device ID: 0x%X\n\r", DEVICE_ID);
 
+    gpio_pin_configure_dt(&led0red, GPIO_OUTPUT_INACTIVE);
+    gpio_pin_configure_dt(&led1green, GPIO_OUTPUT_INACTIVE);
+    gpio_pin_configure_dt(&led2red, GPIO_OUTPUT_INACTIVE);
+    gpio_pin_configure_dt(&led3blue, GPIO_OUTPUT_INACTIVE);
+
     // SETUP DW1000
     k_mutex_init(&dwt_mutex);
     k_mutex_lock(&dwt_mutex, K_FOREVER);
@@ -94,6 +106,7 @@ void main(void)
     dwt_hardreset();
     dwt_hardinterrupt(dwm_int_callback);
 
+    dwt_spi_set_rate_slow();
     if (dwt_initialise(DWT_LOADUCODE) == DWT_ERROR)
     {
         printf("INIT FAILED");
@@ -101,12 +114,14 @@ void main(void)
         {
         };
     }
-    spi_set_rate_high();
+    dwt_spi_set_rate_fast();
 
     dwt_configure(&config);
 
+    dwt_setleds(DWT_LEDS_ENABLE);
+
     dwt_setaddress16(DEVICE_ID);
-    dwt_setpanid(0xDECA);
+    dwt_setpanid(0xabcd);
 
     dwt_enableframefilter(DWT_FF_RSVD_EN | DWT_FF_DATA_EN);
     dwt_setdblrxbuffmode(1);
@@ -117,6 +132,8 @@ void main(void)
     dwt_setcallbacks(uwb_txdone, uwb_rxok, uwb_rxto, uwb_rxerr);
 
     dwt_setinterrupt(DWT_INT_TFRS | DWT_INT_RFCG, 1);
+    dwt_enable_interrupt();
+
     k_mutex_unlock(&dwt_mutex);
 
     printf("Settings done!\n\r");
@@ -126,6 +143,12 @@ void main(void)
     k_thread_resume(uwb_tx_thr);
     k_thread_resume(uwb_beacon_thr);
     k_thread_resume(uwb_ranging_thr);
+
+    while (1)
+    {
+        gpio_pin_toggle_dt(&led1green);
+        sleep_ms(200);
+    }
 
     return;
 }
@@ -148,44 +171,43 @@ void uwb_rx_thread(void)
         int status = RX_ENABLE;
 
         struct rx_queue_t *data = (struct rx_queue_t *)k_fifo_get(&rx_fifo, K_FOREVER);
-        data_msg data_rx;
 
         uint8_t *buffer_rx = data->buffer_rx;
+        int length = data->cb_data->datalength;
 
         uint16_t frame_ctrl;
         memcpy(&frame_ctrl, buffer_rx, sizeof(uint16_t));
         buffer_rx += sizeof(uint16_t);
+        length -= sizeof(uint16_t);
 
         if (frame_ctrl & (DATA | MRS_BEACON))
         {
             // SEQUENCE NUMBER
             buffer_rx += sizeof(uint8_t);
+            length -= sizeof(uint8_t);
 
             uint16_t pan_id;
             memcpy(&pan_id, buffer_rx, sizeof(uint16_t));
             buffer_rx += sizeof(uint16_t);
+            length -= sizeof(uint16_t);
 
             uint16_t destination_id;
             memcpy(&destination_id, buffer_rx, sizeof(uint16_t));
             buffer_rx += sizeof(uint16_t);
+            length -= sizeof(uint16_t);
 
             uint16_t source_id;
             memcpy(&source_id, buffer_rx, sizeof(uint16_t));
             buffer_rx += sizeof(uint16_t);
+            length -= sizeof(uint16_t);
 
-            // DECODE THE DATA
-            pb_istream_t stream = pb_istream_from_buffer(buffer_rx, data->cb_data->datalength - 9);
-            pb_decode(&stream, data_msg_fields, &data_rx);
+            uint8_t which_data;
+            memcpy(&which_data, buffer_rx, sizeof(uint8_t));
+            buffer_rx += sizeof(uint8_t);
+            length -= sizeof(uint8_t);
 
-            status = rx_message(data_rx.which_data, source_id, (const void *)&(data_rx.data), data);
+            status = rx_message(which_data, source_id, (const uint8_t *) buffer_rx, length, data);
         }
-
-        // if (status == RX_ENABLE)
-        // {
-        //     k_mutex_lock(&dwt_mutex, K_FOREVER);
-        //     dwt_rxenable(DWT_START_RX_IMMEDIATE);
-        //     k_mutex_unlock(&dwt_mutex);
-        // }
 
         // FREE QUEUE DATA
         k_free(data->buffer_rx);
@@ -237,6 +259,7 @@ void uwb_tx_thread(void)
         }
         else
         {
+            printf("Tx fail\n\r");
             dwt_forcetrxoff();
             dwt_rxenable(DWT_START_RX_IMMEDIATE);
         }
@@ -256,37 +279,39 @@ void uwb_txdone(const dwt_cb_data_t *data)
 // RX TIMEOUT
 void uwb_rxto(const dwt_cb_data_t *data)
 {
+    dwt_rxenable(DWT_START_RX_IMMEDIATE);
 }
 // RX ERROR
 void uwb_rxerr(const dwt_cb_data_t *data)
 {
+    dwt_rxenable(DWT_START_RX_IMMEDIATE);
 }
 // RECEIVE OK
 void uwb_rxok(const dwt_cb_data_t *data)
 {
+    int32_t integrator = dwt_readcarrierintegrator();
+    uint64_t rx_ts = get_rx_timestamp_u64();
+
     // INIT DATA
     uint16_t msg_length = data->datalength;
-    struct rx_queue_t *queue = k_malloc(sizeof(struct rx_queue_t));
     uint8_t *buffer_rx = k_malloc(msg_length);
-
     // READ THE DATA AND ENABLE RX
-    int32_t integrator = dwt_readcarrierintegrator();
-    dwt_rxenable(DWT_START_RX_IMMEDIATE | DWT_NO_SYNC_PTRS);
-    uint64_t rx_ts = get_rx_timestamp_u64();
     dwt_readrxdata(buffer_rx, msg_length, 0);
+    dwt_rxenable(DWT_START_RX_IMMEDIATE | DWT_NO_SYNC_PTRS);
 
     // INIT QUEUE DATA AND SEND TO RX THREAD THROUGH QUEUE
+    struct rx_queue_t *queue = k_malloc(sizeof(struct rx_queue_t));
     queue->cb_data = data;
     queue->buffer_rx = buffer_rx;
     queue->rx_timestamp = rx_ts;
     queue->carrier_integrator = integrator;
 
-    k_fifo_put(&rx_fifo, queue);
+    k_fifo_alloc_put(&rx_fifo, queue);
 
     return;
 }
 
-K_SEM_DEFINE(isr_semaphore, 0, 2);
+K_SEM_DEFINE(isr_semaphore, 0, 10);
 
 void dwt_isr_thread(void)
 {

@@ -9,15 +9,7 @@
 PB_BIND(beacon_msg, beacon_msg, AUTO)
 
 
-PB_BIND(ranging_init_msg, ranging_init_msg, AUTO)
-
-
 PB_BIND(ranging_response_msg, ranging_response_msg, AUTO)
-
-
-PB_BIND(data_msg, data_msg, AUTO)
-
-
 
 
 

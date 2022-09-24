@@ -30,11 +30,19 @@ void dwt_hardreset()
 	gpio_pin_configure_dt(&dwm_reset, GPIO_OUTPUT_HIGH);
 }
 
-void dwt_hardinterrupt(void* callback)
+void dwt_hardinterrupt(void *callback)
 {
 	gpio_pin_configure_dt(&dwm_int, GPIO_INPUT);
-	gpio_pin_interrupt_configure_dt(&dwm_int, GPIO_INT_EDGE_TO_ACTIVE);
 
 	gpio_init_callback(&dwm_int_cb_data, callback, BIT(dwm_int.pin));
 	gpio_add_callback(dwm_int.port, &dwm_int_cb_data);
+}
+
+void dwt_disable_interrupt()
+{
+	gpio_pin_interrupt_configure_dt(&dwm_int, GPIO_INT_DISABLE);
+}
+void dwt_enable_interrupt()
+{
+	gpio_pin_interrupt_configure_dt(&dwm_int, GPIO_INT_EDGE_TO_ACTIVE);
 }

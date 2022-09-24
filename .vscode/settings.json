@@ -10,7 +10,9 @@
         "zephyr.h": "c",
         "kernel.h": "c",
         "pb.h": "c",
-        "common_types.h": "c"
+        "common_types.h": "c",
+        "common_macro.h": "c",
+        "__assert.h": "c"
     },
     "cortex-debug.variableUseNaturalFormat": false
 }

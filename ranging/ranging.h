@@ -10,13 +10,28 @@
 
 #define SPEED_OF_LIGHT 299702547.0
 
-enum {
+enum
+{
     SUCCESS,
     RX_ENABLE
 };
 
+
 #include "common_types.h"
 #include "deca_device_api.h"
+
+
+enum
+{
+    BEACON_MSG,
+    RANGING_INIT_MSG,
+    RANGING_RESPONSE_MSG
+};
+
+enum
+{
+    UAV_TYPE_DEFAULT = 0
+};
 
 #pragma once
 #ifdef __cplusplus
@@ -24,16 +39,16 @@ extern "C"
 {
 #endif
 
-// THREADS
-void uwb_beacon_thread(void);
-void uwb_ranging_thread(void);
+    // THREADS
+    void uwb_beacon_thread(void);
+    void uwb_ranging_thread(void);
 
-// FUNCTIONS
-int rx_message(const uint32_t msg_type, const uint16_t source_id, const void *msg, struct rx_queue_t *queue_data);
+    // FUNCTIONS
+    int rx_message(const uint32_t msg_type, const uint16_t source_id, const void *msg, int len, struct rx_queue_t *queue_data);
 
-int rx_beacon(const uint16_t source_id, beacon_msg *beacon);
-int rx_ranging_init(const uint16_t source_id, ranging_init_msg *msg, struct rx_queue_t *queue_data);
-int rx_ranging_response(const uint16_t source_id, ranging_response_msg *msg, struct rx_queue_t *queue_data);
+    int rx_beacon(const uint16_t source_id, void *msg);
+    int rx_ranging_init(const uint16_t source_id, void *msg, struct rx_queue_t *queue_data);
+    int rx_ranging_response(const uint16_t source_id, void *msg, struct rx_queue_t *queue_data);
 
 #ifdef __cplusplus
 }

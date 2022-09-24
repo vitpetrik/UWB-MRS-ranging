@@ -32,10 +32,16 @@ const struct spi_cs_control cs_ctrl = {
     .delay = 0,
 };
 
-struct spi_config spi_cfg = {
-    .frequency = 3600000U,
+struct spi_config dwt_spi_cfg_slow = {
+    .frequency = 2000000U,
     .operation = SPI_WORD_SET(8) | SPI_TRANSFER_MSB | SPI_OP_MODE_MASTER,
     .cs = &cs_ctrl};
+struct spi_config dwt_spi_cfg_fast = {
+    .frequency = 8000000U,
+    .operation = SPI_WORD_SET(8) | SPI_TRANSFER_MSB | SPI_OP_MODE_MASTER,
+    .cs = &cs_ctrl};
+
+struct spi_config *dwt_spi_cfg;
 
 /*! ------------------------------------------------------------------------------------------------------------------
  * Function: writetospi()
@@ -61,7 +67,7 @@ int writetospi(uint16 headerLength, const uint8 *headerBuffer, uint32 bodylength
     struct spi_buf_set buff_tx = {.buffers = spi_buf_tx, .count = 2};
     struct spi_buf_set buff_rx = {.buffers = spi_buf_rx, .count = 2};
 
-    int error = spi_transceive(spi, &spi_cfg, &buff_tx, &buff_rx);
+    int error = spi_transceive(spi, dwt_spi_cfg, &buff_tx, &buff_rx);
 
     if (error < 0)
         return -1;
@@ -96,7 +102,7 @@ int readfromspi(uint16 headerLength, const uint8 *headerBuffer, uint32 readlengt
     struct spi_buf_set buff_tx = {.buffers = spi_buf_tx, .count = 2};
     struct spi_buf_set buff_rx = {.buffers = spi_buf_rx, .count = 2};
 
-    int error = spi_transceive(spi, &spi_cfg, &buff_tx, &buff_rx);
+    int error = spi_transceive(spi, dwt_spi_cfg, &buff_tx, &buff_rx);
 
     if (error < 0)
         return -1;
@@ -104,7 +110,11 @@ int readfromspi(uint16 headerLength, const uint8 *headerBuffer, uint32 readlengt
     return 0;
 } // end readfromspi()
 
-void spi_set_rate_high()
+void dwt_spi_set_rate_slow()
 {
-    spi_cfg.frequency = 8000000;
+    dwt_spi_cfg = &dwt_spi_cfg_slow;
+}
+void dwt_spi_set_rate_fast()
+{
+    dwt_spi_cfg = &dwt_spi_cfg_fast;
 }
