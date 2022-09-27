@@ -26,6 +26,7 @@
 const char *buildString = "Build was compiled at " __DATE__ ", " __TIME__ ".";
 
 uint16_t DEVICE_ID;
+uint16_t PAN_ID;
 uint8_t SEQ_NUM;
 
 // LEDS
@@ -57,6 +58,8 @@ struct k_mutex dwt_mutex;
 static uint64_t get_rx_timestamp_u64(void);
 static uint64_t get_tx_timestamp_u64(void);
 
+int process_MAC(struct mac_data_t *mac_data, uint8_t *rx_buffer);
+
 // THREADS
 void uwb_tx_thread(void);
 void uwb_rx_thread(void);
@@ -66,8 +69,8 @@ void dwt_isr_thread(void);
 K_THREAD_DEFINE(uwb_beacon_thr, 1024, uwb_beacon_thread, NULL, NULL, NULL, 5, 0, 0);
 K_THREAD_DEFINE(uwb_ranging_thr, 1024, uwb_ranging_thread, NULL, NULL, NULL, 5, 0, 0);
 
-K_THREAD_DEFINE(uwb_rx_thr, 1024, uwb_rx_thread, NULL, NULL, NULL, -2, 0, 0);
-K_THREAD_DEFINE(uwb_tx_thr, 1024, uwb_tx_thread, NULL, NULL, NULL, -1, 0, 0);
+K_THREAD_DEFINE(uwb_rx_thr, 1024, uwb_rx_thread, NULL, NULL, NULL, 3, 0, 0);
+K_THREAD_DEFINE(uwb_tx_thr, 1024, uwb_tx_thread, NULL, NULL, NULL, -2, 0, 0);
 
 K_THREAD_DEFINE(dwt_isr_thr, 1024, dwt_isr_thread, NULL, NULL, NULL, -1, 0, 0);
 
@@ -90,6 +93,7 @@ void main(void)
     printf("%s\n\r", buildString);
 
     DEVICE_ID = NRF_FICR->DEVICEID[0] >> 16;
+    PAN_ID = 0xdeca;
     SEQ_NUM = 0;
 
     printf("Device ID: 0x%X\n\r", DEVICE_ID);
@@ -121,9 +125,9 @@ void main(void)
     dwt_setleds(DWT_LEDS_ENABLE);
 
     dwt_setaddress16(DEVICE_ID);
-    dwt_setpanid(0xabcd);
+    dwt_setpanid(PAN_ID);
 
-    dwt_enableframefilter(DWT_FF_RSVD_EN | DWT_FF_DATA_EN);
+    // dwt_enableframefilter(DWT_FF_RSVD_EN | DWT_FF_DATA_EN);
     dwt_setdblrxbuffmode(1);
 
     dwt_settxantennadelay(21920);
@@ -141,6 +145,7 @@ void main(void)
     // START THE THREADS
     k_thread_resume(uwb_rx_thr);
     k_thread_resume(uwb_tx_thr);
+    sleep_ms(500);
     k_thread_resume(uwb_beacon_thr);
     k_thread_resume(uwb_ranging_thr);
 
@@ -167,50 +172,12 @@ void uwb_rx_thread(void)
 
     while (1)
     {
-        // RECEIVE DATA FROM INTERRUPT THROUGH QUEUE
-        int status = RX_ENABLE;
-
         struct rx_queue_t *data = (struct rx_queue_t *)k_fifo_get(&rx_fifo, K_FOREVER);
 
-        uint8_t *buffer_rx = data->buffer_rx;
-        int length = data->cb_data->datalength;
-
-        uint16_t frame_ctrl;
-        memcpy(&frame_ctrl, buffer_rx, sizeof(uint16_t));
-        buffer_rx += sizeof(uint16_t);
-        length -= sizeof(uint16_t);
-
-        if (frame_ctrl & (DATA | MRS_BEACON))
-        {
-            // SEQUENCE NUMBER
-            buffer_rx += sizeof(uint8_t);
-            length -= sizeof(uint8_t);
-
-            uint16_t pan_id;
-            memcpy(&pan_id, buffer_rx, sizeof(uint16_t));
-            buffer_rx += sizeof(uint16_t);
-            length -= sizeof(uint16_t);
-
-            uint16_t destination_id;
-            memcpy(&destination_id, buffer_rx, sizeof(uint16_t));
-            buffer_rx += sizeof(uint16_t);
-            length -= sizeof(uint16_t);
-
-            uint16_t source_id;
-            memcpy(&source_id, buffer_rx, sizeof(uint16_t));
-            buffer_rx += sizeof(uint16_t);
-            length -= sizeof(uint16_t);
-
-            uint8_t which_data;
-            memcpy(&which_data, buffer_rx, sizeof(uint8_t));
-            buffer_rx += sizeof(uint8_t);
-            length -= sizeof(uint8_t);
-
-            status = rx_message(which_data, source_id, (const uint8_t *) buffer_rx, length, data);
-        }
+        rx_message(data);
 
         // FREE QUEUE DATA
-        k_free(data->buffer_rx);
+        k_free(data->buffer_rx_free_ptr);
         k_free(data);
     }
 }
@@ -289,22 +256,34 @@ void uwb_rxerr(const dwt_cb_data_t *data)
 // RECEIVE OK
 void uwb_rxok(const dwt_cb_data_t *data)
 {
-    int32_t integrator = dwt_readcarrierintegrator();
-    uint64_t rx_ts = get_rx_timestamp_u64();
-
     // INIT DATA
     uint16_t msg_length = data->datalength;
     uint8_t *buffer_rx = k_malloc(msg_length);
+
     // READ THE DATA AND ENABLE RX
-    dwt_readrxdata(buffer_rx, msg_length, 0);
+    int32_t integrator = dwt_readcarrierintegrator();
     dwt_rxenable(DWT_START_RX_IMMEDIATE | DWT_NO_SYNC_PTRS);
+    uint64_t rx_ts = get_rx_timestamp_u64();
+    dwt_readrxdata(buffer_rx, msg_length, 0);
+
+    struct rx_details_t rx_details = {.carrier_integrator = integrator, .rx_timestamp = rx_ts};
 
     // INIT QUEUE DATA AND SEND TO RX THREAD THROUGH QUEUE
+
+    struct mac_data_t mac_data;
+    int mac_lenght = process_MAC(&mac_data, buffer_rx);
+
+    if (mac_data.pan_id != PAN_ID || (mac_data.destination_id != DEVICE_ID && mac_data.destination_id != 0xffff))
+    {
+        k_free(buffer_rx);
+        return;
+    }
+
     struct rx_queue_t *queue = k_malloc(sizeof(struct rx_queue_t));
-    queue->cb_data = data;
-    queue->buffer_rx = buffer_rx;
-    queue->rx_timestamp = rx_ts;
-    queue->carrier_integrator = integrator;
+    queue->mac_data = mac_data;
+    queue->buffer_rx = buffer_rx + mac_lenght;
+    queue->buffer_rx_free_ptr = buffer_rx;
+    queue->rx_details = rx_details;
 
     k_fifo_alloc_put(&rx_fifo, queue);
 
@@ -328,6 +307,38 @@ void dwm_int_callback(const struct device *dev, struct gpio_callback *cb, uint32
 {
     k_sem_give(&isr_semaphore);
     return;
+}
+
+int process_MAC(struct mac_data_t *mac_data, uint8_t *buffer_rx)
+{
+    int length = 0;
+
+    memcpy(&mac_data->frame_ctrl, buffer_rx, sizeof(uint16_t));
+    buffer_rx += sizeof(uint16_t);
+    length += sizeof(uint16_t);
+
+    // SEQUENCE NUMBER
+    memcpy(&mac_data->seq_num, buffer_rx, sizeof(uint8_t));
+    buffer_rx += sizeof(uint8_t);
+    length += sizeof(uint8_t);
+
+    memcpy(&mac_data->pan_id, buffer_rx, sizeof(uint16_t));
+    buffer_rx += sizeof(uint16_t);
+    length += sizeof(uint16_t);
+
+    memcpy(&mac_data->destination_id, buffer_rx, sizeof(uint16_t));
+    buffer_rx += sizeof(uint16_t);
+    length += sizeof(uint16_t);
+
+    memcpy(&mac_data->source_id, buffer_rx, sizeof(uint16_t));
+    buffer_rx += sizeof(uint16_t);
+    length += sizeof(uint16_t);
+
+    memcpy(&mac_data->msg_type, buffer_rx, sizeof(uint8_t));
+    buffer_rx += sizeof(uint8_t);
+    length += sizeof(uint8_t);
+
+    return length;
 }
 
 // GET RX TIMESTAMP IN 40-BIT FORMAT

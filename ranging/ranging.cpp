@@ -14,6 +14,8 @@
 #include "common_macro.h"
 
 extern uint16_t DEVICE_ID;
+extern uint16_t PAN_ID;
+
 extern uint8_t SEQ_NUM;
 
 extern struct k_fifo tx_fifo;
@@ -22,19 +24,22 @@ extern struct k_fifo rx_fifo;
 typedef std::unordered_map<uint32_t, struct device_t *> devices_map_t;
 devices_map_t devices_map;
 
-int rx_message(const uint32_t msg_type, const uint16_t source_id, const void *msg, int len, struct rx_queue_t *queue_data)
+int rx_message(struct rx_queue_t *queue_data)
 {
+    int source_id = queue_data->mac_data.source_id;
+    struct rx_details_t *tx_details = &queue_data->rx_details;
+
     int status = SUCCESS;
-    switch (msg_type)
+    switch (queue_data->mac_data.msg_type)
     {
     case BEACON_MSG:
-        status = rx_beacon(source_id, (void *)msg);
+        status = rx_beacon(source_id, (void *)queue_data->buffer_rx);
         break;
     case RANGING_INIT_MSG:
-        status = rx_ranging_init(source_id, (void *)msg, queue_data);
+        status = rx_ranging_init(source_id, (void *)queue_data->buffer_rx, tx_details);
         break;
     case RANGING_RESPONSE_MSG:
-        status = rx_ranging_response(source_id, (void *)msg, queue_data);
+        status = rx_ranging_response(source_id, (void *)queue_data->buffer_rx, tx_details);
         break;
     default:
         printf("Unknown message type\n\r");
@@ -53,7 +58,7 @@ void tx_message(const uint16_t destination_id, const frame_type_t frame_type, co
 
     int frame_length = 0;
 
-    uint16_t frame_ctrl = 0x8840 | frame_type;
+    uint16_t frame_ctrl = 0x9840 | frame_type;
     memcpy(buffer_tx, &frame_ctrl, sizeof(uint16_t));
     buffer_tx += sizeof(uint16_t);
     frame_length += sizeof(uint16_t);
@@ -63,8 +68,8 @@ void tx_message(const uint16_t destination_id, const frame_type_t frame_type, co
     frame_length += sizeof(uint8_t);
     SEQ_NUM++;
 
-    uint16_t pan_id = 0xabcd;
-    memcpy(buffer_tx, &pan_id, sizeof(uint16_t));
+    uint16_t pan_id_temp = PAN_ID;
+    memcpy(buffer_tx, &pan_id_temp, sizeof(uint16_t));
     buffer_tx += sizeof(uint16_t);
     frame_length += sizeof(uint16_t);
 
@@ -120,15 +125,15 @@ int rx_beacon(const uint16_t source_id, void *msg)
     return 0;
 }
 
-int rx_ranging_init(const uint16_t source_id, void *msg, struct rx_queue_t *rx_metadata)
+int rx_ranging_init(const uint16_t source_id, void *msg, struct rx_details_t *rx_details)
 {
     ranging_response_msg resp;
     uint8_t buffer_tx[ranging_response_msg_size];
 
     // CALCULATE TX TIMESTAMP
-    uint64_t tx_timestamp = rx_metadata->rx_timestamp + (10000 * UUS_TO_DWT_TIME);
+    uint64_t tx_timestamp = rx_details->rx_timestamp + (10000 * UUS_TO_DWT_TIME);
     tx_timestamp &= 0xffffffffffffff00;
-    uint64_t delay = tx_timestamp - rx_metadata->rx_timestamp;
+    uint64_t delay = tx_timestamp - rx_details->rx_timestamp;
 
     resp.delay = (uint32_t)delay;
 
@@ -138,7 +143,6 @@ int rx_ranging_init(const uint16_t source_id, void *msg, struct rx_queue_t *rx_m
         .tx_delay = (uint32_t)(tx_timestamp >> 8),
         .tx_timestamp = NULL};
 
-
     pb_ostream_t stream = pb_ostream_from_buffer(buffer_tx, ranging_response_msg_size);
     pb_encode(&stream, ranging_response_msg_fields, &resp);
 
@@ -147,7 +151,7 @@ int rx_ranging_init(const uint16_t source_id, void *msg, struct rx_queue_t *rx_m
     return 0;
 }
 
-int rx_ranging_response(const uint16_t source_id, void *msg, struct rx_queue_t *rx_metadata)
+int rx_ranging_response(const uint16_t source_id, void *msg, struct rx_details_t *rx_details)
 {
     if (not devices_map.count(source_id))
         return -1;
@@ -159,10 +163,10 @@ int rx_ranging_response(const uint16_t source_id, void *msg, struct rx_queue_t *
 
     struct device_t *device = (struct device_t *)devices_map[source_id];
 
-    double clockOffsetRatio = rx_metadata->carrier_integrator * (FREQ_OFFSET_MULTIPLIER * HERTZ_TO_PPM_MULTIPLIER_CHAN_5 / 1.0e6);
+    double clockOffsetRatio = rx_details->carrier_integrator * (FREQ_OFFSET_MULTIPLIER * HERTZ_TO_PPM_MULTIPLIER_CHAN_5 / 1.0e6);
 
     // CALCULATE DISTANCE
-    uint64_t rx_timestamp = rx_metadata->rx_timestamp;
+    uint64_t rx_timestamp = rx_details->rx_timestamp;
     uint64_t tx_timestamp = device->ranging.tx_timestamp;
 
     long timespan;
@@ -216,7 +220,7 @@ void uwb_beacon_thread(void)
         pb_ostream_t stream = pb_ostream_from_buffer(buffer_tx, beacon_msg_size);
         pb_encode(&stream, beacon_msg_fields, &beacon);
 
-        tx_message(0, MRS_BEACON, BEACON_MSG, (const uint8_t *)buffer_tx, stream.bytes_written, &tx_details);
+        tx_message(0xffff, MRS_BEACON, BEACON_MSG, (const uint8_t *)buffer_tx, stream.bytes_written, &tx_details);
 
         sleep_ms(10000 + 200 * (1 - sys_rand32_get() / 2147483648));
     }

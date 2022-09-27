@@ -44,11 +44,11 @@ extern "C"
     void uwb_ranging_thread(void);
 
     // FUNCTIONS
-    int rx_message(const uint32_t msg_type, const uint16_t source_id, const void *msg, int len, struct rx_queue_t *queue_data);
+    int rx_message(struct rx_queue_t *queue_data);
 
     int rx_beacon(const uint16_t source_id, void *msg);
-    int rx_ranging_init(const uint16_t source_id, void *msg, struct rx_queue_t *queue_data);
-    int rx_ranging_response(const uint16_t source_id, void *msg, struct rx_queue_t *queue_data);
+    int rx_ranging_init(const uint16_t source_id, void *msg, struct rx_details_t *queue_data);
+    int rx_ranging_response(const uint16_t source_id, void *msg, struct rx_details_t *queue_data);
 
 #ifdef __cplusplus
 }

@@ -20,12 +20,27 @@ typedef enum
     RESERVED_4,
 } frame_type_t;
 
-struct rx_queue_t
+struct rx_details_t
 {
-    const dwt_cb_data_t *cb_data;
-    uint8_t *buffer_rx;
     uint64_t rx_timestamp;
     int32_t carrier_integrator;
+};
+
+struct mac_data_t {
+    uint16_t frame_ctrl;
+    uint8_t seq_num;
+    uint16_t pan_id;
+    uint16_t destination_id;
+    uint16_t source_id;
+    uint8_t msg_type;
+};
+
+struct rx_queue_t
+{
+    uint8_t *buffer_rx;
+    uint8_t *buffer_rx_free_ptr;
+    struct rx_details_t rx_details;
+    struct mac_data_t mac_data;
 };
 
 struct tx_details_t
