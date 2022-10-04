@@ -58,6 +58,8 @@ struct k_mutex dwt_mutex;
 static uint64_t get_rx_timestamp_u64(void);
 static uint64_t get_tx_timestamp_u64(void);
 
+static uint64_t get_sys_timestamp_u64(void);
+
 int process_MAC(struct mac_data_t *mac_data, uint8_t *rx_buffer);
 
 // THREADS
@@ -207,18 +209,25 @@ void uwb_tx_thread(void)
         if (dwt_read32bitreg(SYS_STATE_ID) & 0x0f00)
             dwt_write8bitoffsetreg(SYS_CTRL_ID, SYS_CTRL_OFFSET, (uint8)SYS_CTRL_TRXOFF); // Disable the radio
 
+        // SET DELAYED TX TIMESTAMP
+        if (data_tx->tx_details.tx_mode & DWT_START_TX_DELAYED)
+        {
+            uint64_t sys_time = get_sys_timestamp_u64();
+            uint64_t tx_timestamp = sys_time + (data_tx->tx_details.tx_delay.reserved_time * UUS_TO_DWT_TIME);
+
+            tx_timestamp &= 0xffffffffffffff00;
+            uint32_t delay = tx_timestamp - data_tx->tx_details.tx_delay.rx_timestamp;
+
+            memcpy(&(data_tx->frame_buffer[10]), &delay, sizeof(uint32_t));
+            dwt_setdelayedtrxtime((uint32_t)(tx_timestamp >> 8));
+        }
+
         // WRITE DATA TO TX BUFFER
         dwt_writetxdata(data_tx->frame_length, data_tx->frame_buffer, 0);
         dwt_writetxfctrl(data_tx->frame_length, 0, data_tx->tx_details.ranging);
 
-        // SET DELAYED TX TIMESTAMP
-        if (data_tx->tx_details.tx_mode & DWT_START_TX_DELAYED)
-        {
-            dwt_setdelayedtrxtime(data_tx->tx_details.tx_delay);
-        }
-
         // START TRANSMITTING
-        if ((dwt_starttx(data_tx->tx_details.tx_mode) == DWT_SUCCESS) && (k_condvar_wait(&tx_condvar, &dwt_mutex, K_MSEC(10)) == 0))
+        if ((dwt_starttx(data_tx->tx_details.tx_mode) == DWT_SUCCESS) && (k_condvar_wait(&tx_condvar, &dwt_mutex, K_MSEC(1)) == 0))
         {
             uint64_t *timestamp_ptr = data_tx->tx_details.tx_timestamp;
             if (timestamp_ptr != NULL)
@@ -347,6 +356,10 @@ int process_MAC(struct mac_data_t *mac_data, uint8_t *buffer_rx)
     buffer_rx += sizeof(uint8_t);
     length += sizeof(uint8_t);
 
+    memcpy(&mac_data->tx_delay, buffer_rx, sizeof(uint32_t));
+    buffer_rx += sizeof(uint32_t);
+    length += sizeof(uint32_t);
+
     return length;
 }
 
@@ -372,6 +385,21 @@ static uint64_t get_tx_timestamp_u64(void)
     uint64_t ts = 0;
     int i;
     dwt_readtxtimestamp(ts_tab);
+    for (i = 4; i >= 0; i--)
+    {
+        ts = (ts << 8) + ts_tab[i];
+    }
+    ts &= (uint64_t)0x000000ffffffffff;
+    return ts;
+}
+
+// GET TX TIMESTAMP IN 40-BIT FORMAT
+static uint64_t get_sys_timestamp_u64(void)
+{
+    uint8 ts_tab[5];
+    uint64_t ts = 0;
+    int i;
+    dwt_readsystime(ts_tab);
     for (i = 4; i >= 0; i--)
     {
         ts = (ts << 8) + ts_tab[i];

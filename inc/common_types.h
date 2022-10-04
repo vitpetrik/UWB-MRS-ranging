@@ -24,6 +24,7 @@ struct rx_details_t
 {
     uint64_t rx_timestamp;
     int32_t carrier_integrator;
+    uint32_t tx_delay;
 };
 
 struct mac_data_t {
@@ -33,6 +34,7 @@ struct mac_data_t {
     uint16_t destination_id;
     uint16_t source_id;
     uint8_t msg_type;
+    uint32_t tx_delay;
 };
 
 struct rx_queue_t
@@ -43,12 +45,18 @@ struct rx_queue_t
     struct mac_data_t mac_data;
 };
 
+struct tx_delay_t
+{
+    uint64_t rx_timestamp;
+    uint32_t reserved_time;
+};
+
 struct tx_details_t
 {
     int ranging;
     uint8_t tx_mode;
-    uint32_t tx_delay;
     uint64_t *tx_timestamp;
+    struct tx_delay_t tx_delay;
 };
 
 struct tx_queue_t
@@ -65,6 +73,7 @@ struct ranging_t
     double delay;
     uint64_t tx_timestamp;
     uint64_t rx_timestamp;
+    uint32_t counter;
 };
 
 struct device_t

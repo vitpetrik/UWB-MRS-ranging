@@ -26,10 +26,13 @@ extern struct k_fifo rx_fifo;
 typedef std::unordered_map<uint32_t, struct device_t *> devices_map_t;
 devices_map_t devices_map;
 
+K_SEM_DEFINE(print_ranging_semaphore, 0, 1);
+
 int rx_message(struct rx_queue_t *queue_data)
 {
     int source_id = queue_data->mac_data.source_id;
-    struct rx_details_t *tx_details = &queue_data->rx_details;
+    struct rx_details_t *rx_details = &queue_data->rx_details;
+    rx_details->tx_delay = queue_data->mac_data.tx_delay;
 
     int status = SUCCESS;
     switch (queue_data->mac_data.msg_type)
@@ -38,10 +41,10 @@ int rx_message(struct rx_queue_t *queue_data)
         status = rx_beacon(source_id, (void *)queue_data->buffer_rx);
         break;
     case RANGING_INIT_MSG:
-        status = rx_ranging_init(source_id, (void *)queue_data->buffer_rx, tx_details);
+        status = rx_ranging_init(source_id, (void *)queue_data->buffer_rx, rx_details);
         break;
     case RANGING_RESPONSE_MSG:
-        status = rx_ranging_response(source_id, (void *)queue_data->buffer_rx, tx_details);
+        status = rx_ranging_response(source_id, (void *)queue_data->buffer_rx, rx_details);
         break;
     default:
         printf("Unknown message type\n\r");
@@ -53,7 +56,7 @@ int rx_message(struct rx_queue_t *queue_data)
 void tx_message(const uint16_t destination_id, const frame_type_t frame_type, const int msg_type, const uint8_t *msg, int len, tx_details_t *tx_details)
 {
     // ALLOCATE MEMORY FOR tx BUFFER AND QUEUE DATA
-    uint8_t *buffer_tx = (uint8_t *)k_malloc(10 + len + 2);
+    uint8_t *buffer_tx = (uint8_t *)k_malloc(10 + 4 + len + 2);
     struct tx_queue_t *queue_data = (struct tx_queue_t *)k_malloc(sizeof(struct tx_queue_t));
 
     queue_data->frame_buffer = buffer_tx;
@@ -88,8 +91,14 @@ void tx_message(const uint16_t destination_id, const frame_type_t frame_type, co
     buffer_tx += sizeof(uint8_t);
     frame_length += sizeof(uint8_t);
 
+    //! reserve memory for tx processing delay
+    buffer_tx += sizeof(uint32_t);
+    frame_length += sizeof(uint32_t);
+
     memcpy(buffer_tx, msg, len);
     frame_length += len;
+
+    //! reserve memory for CRC
     frame_length += 2;
 
     // INITIALIZE QUEUE DATA
@@ -111,7 +120,7 @@ int rx_beacon(const uint16_t source_id, void *msg)
     if (not devices_map.contains(source_id))
     {
         devices_map[source_id] = (struct device_t *)k_malloc(sizeof(struct device_t));
-        devices_map[source_id]->ranging = {0, 0, 0, 0};
+        devices_map[source_id]->ranging = {0, 0, 0, 0, 0};
     }
     struct device_t *device = devices_map[source_id];
 
@@ -125,26 +134,13 @@ int rx_beacon(const uint16_t source_id, void *msg)
 
 int rx_ranging_init(const uint16_t source_id, void *msg, struct rx_details_t *rx_details)
 {
-    ranging_response_msg resp;
-    uint8_t buffer_tx[ranging_response_msg_size];
-
-    // CALCULATE TX TIMESTAMP
-    uint64_t tx_timestamp = rx_details->rx_timestamp + (10000 * UUS_TO_DWT_TIME);
-    tx_timestamp &= 0xffffffffffffff00;
-    uint64_t delay = tx_timestamp - rx_details->rx_timestamp;
-
-    resp.delay = (uint32_t)delay;
-
     struct tx_details_t tx_details = {
         .ranging = 1,
         .tx_mode = DWT_START_TX_DELAYED | DWT_RESPONSE_EXPECTED,
-        .tx_delay = (uint32_t)(tx_timestamp >> 8),
-        .tx_timestamp = NULL};
+        .tx_timestamp = NULL,
+        .tx_delay = {.rx_timestamp = rx_details->rx_timestamp, .reserved_time = 750}};
 
-    pb_ostream_t stream = pb_ostream_from_buffer(buffer_tx, ranging_response_msg_size);
-    pb_encode(&stream, ranging_response_msg_fields, &resp);
-
-    tx_message(source_id, DATA, RANGING_RESPONSE_MSG, (const uint8_t *)buffer_tx, ranging_response_msg_size, &tx_details);
+    tx_message(source_id, DATA, RANGING_RESPONSE_MSG, (const uint8_t *)NULL, 0, &tx_details);
 
     return 0;
 }
@@ -153,11 +149,6 @@ int rx_ranging_response(const uint16_t source_id, void *msg, struct rx_details_t
 {
     if (not devices_map.count(source_id))
         return -1;
-
-    ranging_response_msg resp;
-
-    pb_istream_t stream = pb_istream_from_buffer((uint8_t *)msg, ranging_response_msg_size);
-    pb_decode(&stream, ranging_response_msg_fields, &resp);
 
     struct device_t *device = (struct device_t *)devices_map[source_id];
 
@@ -177,15 +168,19 @@ int rx_ranging_response(const uint16_t source_id, void *msg, struct rx_details_t
         timespan = rx_timestamp + (0x000000ffffffffffU - tx_timestamp);
     }
 
-    double diff = timespan - (1 - clockOffsetRatio) * resp.delay;
+    double diff = timespan - (1 - clockOffsetRatio) * rx_details->tx_delay;
 
     double tof = (diff / 2.) * DWT_TIME_UNITS;
     double dist = tof * SPEED_OF_LIGHT;
 
-    if (abs(dist) > 1000)
+
+    if (device->ranging.counter > 10 && abs(dist - device->ranging.distance) > 10)
         return 0;
 
     device->ranging.distance = dist * 0.05 + device->ranging.distance * (1 - 0.05);
+    device->ranging.counter++;
+
+    k_sem_give(&print_ranging_semaphore);
 
     return 0;
 }
@@ -212,7 +207,6 @@ void uwb_beacon_thread(void)
         struct tx_details_t tx_details = {
             .ranging = 0,
             .tx_mode = DWT_START_TX_IMMEDIATE | DWT_RESPONSE_EXPECTED,
-            .tx_delay = 0,
             .tx_timestamp = NULL};
 
         uint8_t buffer_tx[beacon_msg_size];
@@ -246,7 +240,6 @@ void uwb_ranging_thread(void)
             struct tx_details_t tx_details = {
                 .ranging = 1,
                 .tx_mode = DWT_START_TX_IMMEDIATE | DWT_RESPONSE_EXPECTED,
-                .tx_delay = 0,
                 .tx_timestamp = &(device->ranging.tx_timestamp)};
 
             tx_message(device->id, DATA, RANGING_INIT_MSG, NULL, 0, &tx_details);
@@ -267,7 +260,8 @@ void uwb_ranging_print_thread(void)
 
     while (1)
     {
-        // puts( "\033[2J" );
+        k_sem_take(&print_ranging_semaphore, K_FOREVER);
+
         printf("\033\143");
 
         printf("----------RANGING RESULTS----------\n\r");
@@ -280,7 +274,5 @@ void uwb_ranging_print_thread(void)
         }
 
         printf("-----------------------------------\n\r");
-
-        sleep_ms(200);
     }
 }
