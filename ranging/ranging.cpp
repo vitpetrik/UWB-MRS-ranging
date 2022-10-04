@@ -13,6 +13,8 @@
 #include "ranging.h"
 #include "common_macro.h"
 
+#include <math.h>
+
 extern uint16_t DEVICE_ID;
 extern uint16_t PAN_ID;
 
@@ -67,6 +69,7 @@ void tx_message(const uint16_t destination_id, const frame_type_t frame_type, co
     buffer_tx += sizeof(uint8_t);
     frame_length += sizeof(uint8_t);
     SEQ_NUM++;
+    SEQ_NUM = 0;
 
     uint16_t pan_id_temp = PAN_ID;
     memcpy(buffer_tx, &pan_id_temp, sizeof(uint16_t));
@@ -111,11 +114,6 @@ int rx_beacon(const uint16_t source_id, void *msg)
         devices_map[source_id]->ranging = {0, 0, 0, 0};
     }
     struct device_t *device = devices_map[source_id];
-
-    printf("Received ID: 0x%X at GPS coordinates N%f E%f\n\r",
-           source_id,
-           beacon.GPS[0],
-           beacon.GPS[1]);
 
     device->id = source_id;
     device->uav_type = beacon.uav_type;
@@ -184,8 +182,10 @@ int rx_ranging_response(const uint16_t source_id, void *msg, struct rx_details_t
     double tof = (diff / 2.) * DWT_TIME_UNITS;
     double dist = tof * SPEED_OF_LIGHT;
 
+    if (abs(dist) > 1000)
+        return 0;
+
     device->ranging.distance = dist * 0.05 + device->ranging.distance * (1 - 0.05);
-    printf("Distance to id 0x%X: %.2f m\n\r", source_id, device->ranging.distance);
 
     return 0;
 }
@@ -220,7 +220,7 @@ void uwb_beacon_thread(void)
         pb_ostream_t stream = pb_ostream_from_buffer(buffer_tx, beacon_msg_size);
         pb_encode(&stream, beacon_msg_fields, &beacon);
 
-        tx_message(0xffff, MRS_BEACON, BEACON_MSG, (const uint8_t *)buffer_tx, stream.bytes_written, &tx_details);
+        tx_message(0xffff, DATA, BEACON_MSG, (const uint8_t *)buffer_tx, stream.bytes_written, &tx_details);
 
         sleep_ms(10000 + 200 * (1 - sys_rand32_get() / 2147483648));
     }
@@ -251,7 +251,36 @@ void uwb_ranging_thread(void)
 
             tx_message(device->id, DATA, RANGING_INIT_MSG, NULL, 0, &tx_details);
 
-            sleep_ms(500 + 50 * (1 - sys_rand32_get() / 2147483648));
+            sleep_ms(100);
         }
+    }
+}
+
+// RANGING THREAD
+void uwb_ranging_print_thread(void)
+{
+    k_tid_t thread_id = k_current_get();
+    printf("Ranging print thread started\n\r");
+
+    while (devices_map.empty())
+        sleep_ms(100);
+
+    while (1)
+    {
+        // puts( "\033[2J" );
+        printf("\033\143");
+
+        printf("----------RANGING RESULTS----------\n\r");
+        printf("-------THIS DEVICE ID 0x%X-------\n\r", DEVICE_ID);
+
+        for (auto node : devices_map)
+        {
+            struct device_t *device = (struct device_t *)node.second;
+            printf(" · Distance to node 0x%X: %.2f m\n\r", device->id, device->ranging.distance);
+        }
+
+        printf("-----------------------------------\n\r");
+
+        sleep_ms(200);
     }
 }

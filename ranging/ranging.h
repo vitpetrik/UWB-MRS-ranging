@@ -42,6 +42,7 @@ extern "C"
     // THREADS
     void uwb_beacon_thread(void);
     void uwb_ranging_thread(void);
+    void uwb_ranging_print_thread(void);
 
     // FUNCTIONS
     int rx_message(struct rx_queue_t *queue_data);
