@@ -1137,12 +1137,13 @@ int dwt_spicswakeup(uint8 *buff, uint16 length);
  * @param cbRxOk - the pointer to the RX good frame event callback function
  * @param cbRxTo - the pointer to the RX timeout events callback function
  * @param cbRxErr - the pointer to the RX error events callback function
+ * @param cbRxFrej - the pointer to the RX frame rejection event callback function
  *
  * output parameters
  *
  * no return value
  */
-void dwt_setcallbacks(dwt_cb_t cbTxDone, dwt_cb_t cbRxOk, dwt_cb_t cbRxTo, dwt_cb_t cbRxErr);
+void dwt_setcallbacks(dwt_cb_t cbTxDone, dwt_cb_t cbRxOk, dwt_cb_t cbRxTo, dwt_cb_t cbRxErr, dwt_cb_t cbRxFrej);
 
 /*! ------------------------------------------------------------------------------------------------------------------
  * @fn dwt_checkirq()

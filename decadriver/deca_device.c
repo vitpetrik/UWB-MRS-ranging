@@ -81,6 +81,7 @@ typedef struct
     dwt_cb_t    cbRxOk;             // Callback for RX good frame event
     dwt_cb_t    cbRxTo;             // Callback for RX timeout events
     dwt_cb_t    cbRxErr;            // Callback for RX error events
+    dwt_cb_t    cbRxFrej;            // Callback for RX frame reject
 } dwt_local_data_t ;
 
 static dwt_local_data_t dw1000local[DWT_NUM_DW_DEV] ; // Static local device data, can be an array to support multiple DW1000 testing applications/platforms
@@ -183,6 +184,7 @@ int dwt_initialise(int config)
     pdw1000local->cbRxOk = NULL;
     pdw1000local->cbRxTo = NULL;
     pdw1000local->cbRxErr = NULL;
+    pdw1000local->cbRxFrej = NULL;
 
 #if DWT_API_ERROR_CHECK
     pdw1000local->otp_mask = config ; // Save the READ_OTP config mask
@@ -2323,17 +2325,19 @@ void dwt_setrxaftertxdelay(uint32 rxDelayTime)
  * @param cbRxOk - the pointer to the RX good frame event callback function
  * @param cbRxTo - the pointer to the RX timeout events callback function
  * @param cbRxErr - the pointer to the RX error events callback function
+ * @param cbRxFrej - the pointer to the RX frame rejection event callback function
  *
  * output parameters
  *
  * no return value
  */
-void dwt_setcallbacks(dwt_cb_t cbTxDone, dwt_cb_t cbRxOk, dwt_cb_t cbRxTo, dwt_cb_t cbRxErr)
+void dwt_setcallbacks(dwt_cb_t cbTxDone, dwt_cb_t cbRxOk, dwt_cb_t cbRxTo, dwt_cb_t cbRxErr, dwt_cb_t cbRxFrej)
 {
     pdw1000local->cbTxDone = cbTxDone;
     pdw1000local->cbRxOk = cbRxOk;
     pdw1000local->cbRxTo = cbRxTo;
     pdw1000local->cbRxErr = cbRxErr;
+    pdw1000local->cbRxFrej = cbRxFrej;
 }
 
 /*! ------------------------------------------------------------------------------------------------------------------
@@ -2477,8 +2481,21 @@ void dwt_isr(void)
         }
     }
 
+    if(status & SYS_STATUS_AFFREJ)
+    {
+        dwt_write32bitreg(SYS_STATUS_ID, SYS_STATUS_AFFREJ); // Clear RX error event bits
+
+        pdw1000local->wait4resp = 0;
+
+        if(pdw1000local->cbRxFrej != NULL)
+        {
+            pdw1000local->cbRxFrej(&pdw1000local->cbData);
+        }
+
+    }
+
     // Handle RX errors events
-    if(status & SYS_STATUS_ALL_RX_ERR)
+    if(status & (SYS_STATUS_ALL_RX_ERR & ~SYS_STATUS_AFFREJ))
     {
         dwt_write32bitreg(SYS_STATUS_ID, SYS_STATUS_ALL_RX_ERR); // Clear RX error event bits
 
