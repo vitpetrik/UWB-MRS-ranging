@@ -69,6 +69,8 @@ void dwt_isr_thread(void);
 K_THREAD_DEFINE(uwb_beacon_thr, 1024, uwb_beacon_thread, NULL, NULL, NULL, 5, 0, 0);
 K_THREAD_DEFINE(uwb_ranging_thr, 1024, uwb_ranging_thread, NULL, NULL, NULL, 5, 0, 0);
 
+K_THREAD_DEFINE(uwb_ranging_print_thr, 1024, uwb_ranging_print_thread, NULL, NULL, NULL, 7, 0, 0);
+
 K_THREAD_DEFINE(uwb_rx_thr, 1024, uwb_rx_thread, NULL, NULL, NULL, 3, 0, 0);
 K_THREAD_DEFINE(uwb_tx_thr, 1024, uwb_tx_thread, NULL, NULL, NULL, -2, 0, 0);
 
@@ -78,6 +80,7 @@ K_THREAD_DEFINE(dwt_isr_thr, 1024, dwt_isr_thread, NULL, NULL, NULL, -1, 0, 0);
 void uwb_txdone(const dwt_cb_data_t *data);
 void uwb_rxto(const dwt_cb_data_t *data);
 void uwb_rxerr(const dwt_cb_data_t *data);
+void uwb_rxfrej(const dwt_cb_data_t *data);
 void uwb_rxok(const dwt_cb_data_t *data);
 
 void dwm_int_callback(const struct device *dev, struct gpio_callback *cb, uint32_t pins);
@@ -127,15 +130,15 @@ void main(void)
     dwt_setaddress16(DEVICE_ID);
     dwt_setpanid(PAN_ID);
 
-    // dwt_enableframefilter(DWT_FF_RSVD_EN | DWT_FF_DATA_EN);
+    dwt_enableframefilter(DWT_FF_DATA_EN);
     dwt_setdblrxbuffmode(1);
 
     dwt_settxantennadelay(21920);
     dwt_setrxantennadelay(21920);
 
-    dwt_setcallbacks(uwb_txdone, uwb_rxok, uwb_rxto, uwb_rxerr);
+    dwt_setcallbacks(uwb_txdone, uwb_rxok, uwb_rxto, uwb_rxerr, uwb_rxfrej);
 
-    dwt_setinterrupt(DWT_INT_TFRS | DWT_INT_RFCG, 1);
+    dwt_setinterrupt(DWT_INT_TFRS | DWT_INT_RFCG | DWT_INT_ARFE, 1);
     dwt_enable_interrupt();
 
     k_mutex_unlock(&dwt_mutex);
@@ -253,16 +256,22 @@ void uwb_rxerr(const dwt_cb_data_t *data)
 {
     dwt_rxenable(DWT_START_RX_IMMEDIATE);
 }
+void uwb_rxfrej(const dwt_cb_data_t *data)
+{
+    dwt_rxenable(DWT_START_RX_IMMEDIATE | DWT_NO_SYNC_PTRS);
+}
 // RECEIVE OK
 void uwb_rxok(const dwt_cb_data_t *data)
 {
+    //! READ the integrator first - after rxenable the value gets overwritten
+    int32_t integrator = dwt_readcarrierintegrator();
+    dwt_rxenable(DWT_START_RX_IMMEDIATE | DWT_NO_SYNC_PTRS);
+
     // INIT DATA
     uint16_t msg_length = data->datalength;
     uint8_t *buffer_rx = k_malloc(msg_length);
 
     // READ THE DATA AND ENABLE RX
-    int32_t integrator = dwt_readcarrierintegrator();
-    dwt_rxenable(DWT_START_RX_IMMEDIATE | DWT_NO_SYNC_PTRS);
     uint64_t rx_ts = get_rx_timestamp_u64();
     dwt_readrxdata(buffer_rx, msg_length, 0);
 
