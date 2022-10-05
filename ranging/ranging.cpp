@@ -177,8 +177,10 @@ int rx_ranging_response(const uint16_t source_id, void *msg, struct rx_details_t
     if (device->ranging.counter > 10 && abs(dist - device->ranging.distance) > 10)
         return 0;
 
-    device->ranging.distance = dist * 0.05 + device->ranging.distance * (1 - 0.05);
+    // device->ranging.distance = dist * 0.05 + device->ranging.distance * (1 - 0.05);
+    device->ranging.distance = dist;
     device->ranging.counter++;
+    device->ranging.new_data = true;
 
     k_sem_give(&print_ranging_semaphore);
 
@@ -260,8 +262,7 @@ void uwb_ranging_print_thread(void)
 
     while (1)
     {
-        k_sem_take(&print_ranging_semaphore, K_FOREVER);
-
+        // k_sem_take(&print_ranging_semaphore, K_FOREVER);
         printf("\033\143");
 
         printf("----------RANGING RESULTS----------\n\r");
@@ -270,9 +271,23 @@ void uwb_ranging_print_thread(void)
         for (auto node : devices_map)
         {
             struct device_t *device = (struct device_t *)node.second;
-            printf(" · Distance to node 0x%X: %.2f m\n\r", device->id, device->ranging.distance);
+            if (device->ranging.new_data)
+            {
+                printf("\33[32m");
+                printf(" · Distance to node 0x%X: %.2f m\n\r", device->id, device->ranging.distance);
+                printf("\33[39m");
+            }
+            else
+            {
+                printf("\33[31m");
+                printf(" · Distance to node 0x%X: %.2f m\n\r", device->id, device->ranging.distance);
+                printf("\33[39m");
+            } 
+
+            device->ranging.new_data = false;
         }
 
         printf("-----------------------------------\n\r");
+        sleep_ms(500);
     }
 }

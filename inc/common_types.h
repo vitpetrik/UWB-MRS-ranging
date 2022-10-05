@@ -71,6 +71,7 @@ struct ranging_t
 {
     double distance;
     double delay;
+    uint8_t new_data;
     uint64_t tx_timestamp;
     uint64_t rx_timestamp;
     uint32_t counter;
