@@ -98,7 +98,7 @@ int rx_beacon(const uint16_t source_id, void *msg)
     if (not devices_map.contains(source_id))
     {
         devices_map[source_id] = (struct device_t *)k_malloc(sizeof(struct device_t));
-        devices_map[source_id]->ranging = {0, 0, 0, 0, 0};
+        devices_map[source_id]->ranging = {0, 0, 0, 0, 0, 0};
     }
     struct device_t *device = devices_map[source_id];
 
@@ -129,6 +129,11 @@ int rx_ranging_response(const uint16_t source_id, void *msg, struct rx_details_t
         return -1;
 
     struct device_t *device = (struct device_t *)devices_map[source_id];
+
+    if (device->ranging.counter > 0)
+        device->ranging.integrator = rx_details->carrier_integrator * 0.05 + device->ranging.integrator * (1 - 0.05);
+    else 
+        device->ranging.integrator = rx_details->carrier_integrator;
 
     double clockOffsetRatio = rx_details->carrier_integrator * (FREQ_OFFSET_MULTIPLIER * HERTZ_TO_PPM_MULTIPLIER_CHAN_5 / 1.0e6);
 
