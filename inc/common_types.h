@@ -8,6 +8,8 @@
 #include <pb_decode.h>
 #include "deca_device_api.h"
 
+#include "mac.h"
+
 typedef enum
 {
     BEACON = 0,
@@ -24,16 +26,6 @@ struct rx_details_t
 {
     uint64_t rx_timestamp;
     int32_t carrier_integrator;
-    uint32_t tx_delay;
-};
-
-struct mac_data_t {
-    uint16_t frame_ctrl;
-    uint8_t seq_num;
-    uint16_t pan_id;
-    uint16_t destination_id;
-    uint16_t source_id;
-    uint8_t msg_type;
     uint32_t tx_delay;
 };
 

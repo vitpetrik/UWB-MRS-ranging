@@ -14,6 +14,7 @@
 #include "common_macro.h"
 
 #include <math.h>
+#include "mac.h"
 
 extern uint16_t DEVICE_ID;
 extern uint16_t PAN_ID;
@@ -59,49 +60,26 @@ void tx_message(const uint16_t destination_id, const frame_type_t frame_type, co
     uint8_t *buffer_tx = (uint8_t *)k_malloc(10 + 4 + len + 2);
     struct tx_queue_t *queue_data = (struct tx_queue_t *)k_malloc(sizeof(struct tx_queue_t));
 
-    queue_data->frame_buffer = buffer_tx;
+    struct mac_data_t mac_data = {
+        .frame_ctrl = 0x9840 | frame_type,
+        .seq_num = SEQ_NUM++,
+        .pan_id = PAN_ID,
+        .destination_id = destination_id,
+        .source_id = DEVICE_ID,
+        .msg_type = msg_type,
+        .tx_delay = 0,
+    };
 
-    int frame_length = 0;
+    int frame_length = encode_MAC(&mac_data, buffer_tx);
 
-    uint16_t frame_ctrl = 0x9840 | frame_type;
-    memcpy(buffer_tx, &frame_ctrl, sizeof(uint16_t));
-    buffer_tx += sizeof(uint16_t);
-    frame_length += sizeof(uint16_t);
-
-    memcpy(buffer_tx, &SEQ_NUM, sizeof(uint8_t));
-    buffer_tx += sizeof(uint8_t);
-    frame_length += sizeof(uint8_t);
-    SEQ_NUM++;
-    SEQ_NUM = 0;
-
-    uint16_t pan_id_temp = PAN_ID;
-    memcpy(buffer_tx, &pan_id_temp, sizeof(uint16_t));
-    buffer_tx += sizeof(uint16_t);
-    frame_length += sizeof(uint16_t);
-
-    memcpy(buffer_tx, &destination_id, sizeof(uint16_t));
-    buffer_tx += sizeof(uint16_t);
-    frame_length += sizeof(uint16_t);
-
-    memcpy(buffer_tx, &DEVICE_ID, sizeof(uint16_t));
-    buffer_tx += sizeof(uint16_t);
-    frame_length += sizeof(uint16_t);
-
-    memcpy(buffer_tx, &msg_type, sizeof(uint8_t));
-    buffer_tx += sizeof(uint8_t);
-    frame_length += sizeof(uint8_t);
-
-    //! reserve memory for tx processing delay
-    buffer_tx += sizeof(uint32_t);
-    frame_length += sizeof(uint32_t);
-
-    memcpy(buffer_tx, msg, len);
+    memcpy(buffer_tx + frame_length, msg, len);
     frame_length += len;
 
     //! reserve memory for CRC
     frame_length += 2;
 
     // INITIALIZE QUEUE DATA
+    queue_data->frame_buffer = buffer_tx;
     queue_data->frame_length = frame_length;
     queue_data->tx_details = *tx_details;
 
@@ -172,7 +150,6 @@ int rx_ranging_response(const uint16_t source_id, void *msg, struct rx_details_t
 
     double tof = (diff / 2.) * DWT_TIME_UNITS;
     double dist = tof * SPEED_OF_LIGHT;
-
 
     if (device->ranging.counter > 10 && abs(dist - device->ranging.distance) > 10)
         return 0;
@@ -282,12 +259,12 @@ void uwb_ranging_print_thread(void)
                 printf("\33[31m");
                 printf(" · Distance to node 0x%X: %.2f m\n\r", device->id, device->ranging.distance);
                 printf("\33[39m");
-            } 
+            }
 
             device->ranging.new_data = false;
         }
 
         printf("-----------------------------------\n\r");
-        sleep_ms(500);
+        k_sem_take(&print_ranging_semaphore, K_MSEC(200));
     }
 }

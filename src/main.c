@@ -60,8 +60,6 @@ static uint64_t get_tx_timestamp_u64(void);
 
 static uint64_t get_sys_timestamp_u64(void);
 
-int process_MAC(struct mac_data_t *mac_data, uint8_t *rx_buffer);
-
 // THREADS
 void uwb_tx_thread(void);
 void uwb_rx_thread(void);
@@ -289,7 +287,7 @@ void uwb_rxok(const dwt_cb_data_t *data)
     // INIT QUEUE DATA AND SEND TO RX THREAD THROUGH QUEUE
 
     struct mac_data_t mac_data;
-    int mac_lenght = process_MAC(&mac_data, buffer_rx);
+    int mac_lenght = decode_MAC(&mac_data, buffer_rx);
 
     if (mac_data.pan_id != PAN_ID || (mac_data.destination_id != DEVICE_ID && mac_data.destination_id != 0xffff))
     {
@@ -325,42 +323,6 @@ void dwm_int_callback(const struct device *dev, struct gpio_callback *cb, uint32
 {
     k_sem_give(&isr_semaphore);
     return;
-}
-
-int process_MAC(struct mac_data_t *mac_data, uint8_t *buffer_rx)
-{
-    int length = 0;
-
-    memcpy(&mac_data->frame_ctrl, buffer_rx, sizeof(uint16_t));
-    buffer_rx += sizeof(uint16_t);
-    length += sizeof(uint16_t);
-
-    // SEQUENCE NUMBER
-    memcpy(&mac_data->seq_num, buffer_rx, sizeof(uint8_t));
-    buffer_rx += sizeof(uint8_t);
-    length += sizeof(uint8_t);
-
-    memcpy(&mac_data->pan_id, buffer_rx, sizeof(uint16_t));
-    buffer_rx += sizeof(uint16_t);
-    length += sizeof(uint16_t);
-
-    memcpy(&mac_data->destination_id, buffer_rx, sizeof(uint16_t));
-    buffer_rx += sizeof(uint16_t);
-    length += sizeof(uint16_t);
-
-    memcpy(&mac_data->source_id, buffer_rx, sizeof(uint16_t));
-    buffer_rx += sizeof(uint16_t);
-    length += sizeof(uint16_t);
-
-    memcpy(&mac_data->msg_type, buffer_rx, sizeof(uint8_t));
-    buffer_rx += sizeof(uint8_t);
-    length += sizeof(uint8_t);
-
-    memcpy(&mac_data->tx_delay, buffer_rx, sizeof(uint32_t));
-    buffer_rx += sizeof(uint32_t);
-    length += sizeof(uint32_t);
-
-    return length;
 }
 
 // GET RX TIMESTAMP IN 40-BIT FORMAT

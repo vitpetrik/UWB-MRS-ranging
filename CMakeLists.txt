@@ -19,6 +19,7 @@ target_sources(app PRIVATE
     decadriver/deca_params_init.c
     protocol/data_msg.pb.c
     ranging/ranging.cpp
+    protocol/mac.c
 )
 
 set_property(TARGET app PROPERTY CXX_STANDARD 20)
