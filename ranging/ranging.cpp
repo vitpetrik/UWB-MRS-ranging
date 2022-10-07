@@ -1,6 +1,5 @@
 #include <zephyr/zephyr.h>
 #include <sys/__assert.h>
-#include <zephyr/random/rand32.h>
 #include <string.h>
 
 #include <pb_encode.h>
@@ -130,12 +129,12 @@ int rx_ranging_response(const uint16_t source_id, void *msg, struct rx_details_t
 
     struct device_t *device = (struct device_t *)devices_map[source_id];
 
-    if (device->ranging.counter > 0)
-        device->ranging.integrator = rx_details->carrier_integrator * 0.05 + device->ranging.integrator * (1 - 0.05);
-    else 
+    if (device->ranging.counter < 1)
         device->ranging.integrator = rx_details->carrier_integrator;
+    else
+        device->ranging.integrator = 0.10 * rx_details->carrier_integrator + (1 - 0.10)*device->ranging.integrator;
 
-    double clockOffsetRatio = rx_details->carrier_integrator * (FREQ_OFFSET_MULTIPLIER * HERTZ_TO_PPM_MULTIPLIER_CHAN_5 / 1.0e6);
+    double clockOffsetRatio = device->ranging.integrator * (FREQ_OFFSET_MULTIPLIER * HERTZ_TO_PPM_MULTIPLIER_CHAN_5 / 1.0e6);
 
     // CALCULATE DISTANCE
     uint64_t rx_timestamp = rx_details->rx_timestamp;
@@ -156,15 +155,15 @@ int rx_ranging_response(const uint16_t source_id, void *msg, struct rx_details_t
     double tof = (diff / 2.) * DWT_TIME_UNITS;
     double dist = tof * SPEED_OF_LIGHT;
 
-    if (device->ranging.counter > 10 && abs(dist - device->ranging.distance) > 10)
-        return 0;
+    if (device->ranging.counter < 10 || abs(dist - device->ranging.distance) < 100)
+    {
+        device->ranging.distance = dist;
+        device->ranging.new_data = true;
 
-    // device->ranging.distance = dist * 0.05 + device->ranging.distance * (1 - 0.05);
-    device->ranging.distance = dist;
+        k_sem_give(&print_ranging_semaphore);
+    }
+
     device->ranging.counter++;
-    device->ranging.new_data = true;
-
-    k_sem_give(&print_ranging_semaphore);
 
     return 0;
 }
@@ -200,7 +199,7 @@ void uwb_beacon_thread(void)
 
         tx_message(0xffff, DATA, BEACON_MSG, (const uint8_t *)buffer_tx, stream.bytes_written, &tx_details);
 
-        sleep_ms(10000 + 200 * (1 - sys_rand32_get() / 2147483648));
+        sleep_ms(10000);
     }
 }
 
