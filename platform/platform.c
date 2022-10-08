@@ -6,6 +6,7 @@
 #include <zephyr/drivers/spi.h>
 
 #include "deca_device_api.h"
+#include "deca_regs.h"
 
 #include "platform.h"
 
@@ -45,4 +46,49 @@ void dwt_disable_interrupt()
 void dwt_enable_interrupt()
 {
 	gpio_pin_interrupt_configure_dt(&dwm_int, GPIO_INT_EDGE_TO_ACTIVE);
+}
+
+// GET RX TIMESTAMP IN 40-BIT FORMAT
+uint64_t get_rx_timestamp_u64(void)
+{
+    uint8 ts_tab[5];
+    uint64_t ts = 0;
+    int i;
+    dwt_readrxtimestamp(ts_tab);
+    for (i = 4; i >= 0; i--)
+    {
+        ts = (ts << 8) + ts_tab[i];
+    }
+    ts &= (uint64_t)0x000000ffffffffff;
+    return ts;
+}
+
+// GET TX TIMESTAMP IN 40-BIT FORMAT
+uint64_t get_tx_timestamp_u64(void)
+{
+    uint8 ts_tab[5];
+    uint64_t ts = 0;
+    int i;
+    dwt_readtxtimestamp(ts_tab);
+    for (i = 4; i >= 0; i--)
+    {
+        ts = (ts << 8) + ts_tab[i];
+    }
+    ts &= (uint64_t)0x000000ffffffffff;
+    return ts;
+}
+
+// GET TX TIMESTAMP IN 40-BIT FORMAT
+uint64_t get_sys_timestamp_u64(void)
+{
+    uint8 ts_tab[5];
+    uint64_t ts = 0;
+    int i;
+    dwt_readsystime(ts_tab);
+    for (i = 4; i >= 0; i--)
+    {
+        ts = (ts << 8) + ts_tab[i];
+    }
+    ts &= (uint64_t)0x000000ffffffffff;
+    return ts;
 }

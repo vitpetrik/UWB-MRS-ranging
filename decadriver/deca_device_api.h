@@ -216,6 +216,7 @@ typedef struct
     uint16 datalength;  //length of frame
     uint8  fctrl[2];    //frame control bytes
     uint8  rx_flags;    //RX frame flags, see above
+    float rx_power;
 } dwt_cb_data_t;
 
 // Call-back type for all events

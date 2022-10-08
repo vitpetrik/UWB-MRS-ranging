@@ -27,6 +27,7 @@ struct rx_details_t
     uint64_t rx_timestamp;
     int32_t carrier_integrator;
     uint32_t tx_delay;
+    float rx_power;
 };
 
 struct rx_queue_t
@@ -68,6 +69,7 @@ struct ranging_t
     uint64_t rx_timestamp;
     int32_t counter;
     int32_t integrator;
+    float rx_power;
 };
 
 struct device_t

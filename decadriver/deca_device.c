@@ -18,6 +18,8 @@
 #include "deca_regs.h"
 #include "deca_device_api.h"
 
+#include <math.h>
+
 // Defines for enable_clocks function
 #define FORCE_SYS_XTI  0
 #define ENABLE_ALL_SEQ 1
@@ -2387,7 +2389,7 @@ void dwt_isr(void)
     // Handle RX good frame event
     if(status & SYS_STATUS_RXFCG)
     {
-        uint16 finfo16;
+        uint32 finfo16;
         uint16 len;
 
         dwt_write32bitreg(SYS_STATUS_ID, SYS_STATUS_ALL_RX_GOOD); // Clear all receive status bits
@@ -2395,7 +2397,15 @@ void dwt_isr(void)
         pdw1000local->cbData.rx_flags = 0;
 
         // Read frame info - Only the first two bytes of the register are used here.
-        finfo16 = dwt_read16bitoffsetreg(RX_FINFO_ID, RX_FINFO_OFFSET);
+        finfo16 = dwt_read32bitoffsetreg(RX_FINFO_ID, RX_FINFO_OFFSET);
+
+        // RX power
+        int CIR_PWR = dwt_read16bitoffsetreg(RX_FQUAL_ID, RX_EQUAL_CIR_MXG_SHIFT);
+        int RXPACC = finfo16 >> 20;
+
+        //! try to generalize absoulte substraction
+        float rx_power = 10.*log10f(CIR_PWR*powf(2., 17.)/powf(RXPACC, 2.)) - 121.74;
+        pdw1000local->cbData.rx_power = rx_power;
 
         // Report frame length - Standard frame length up to 127, extended frame length up to 1023 bytes
         len = finfo16 & RX_FINFO_RXFL_MASK_1023;
