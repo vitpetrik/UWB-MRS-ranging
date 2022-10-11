@@ -55,10 +55,6 @@ static dwt_config_t config = {
 struct k_mutex dwt_mutex;
 
 // FUNCTIONS
-static uint64_t get_rx_timestamp_u64(void);
-static uint64_t get_tx_timestamp_u64(void);
-
-static uint64_t get_sys_timestamp_u64(void);
 
 // THREADS
 void uwb_tx_thread(void);
@@ -125,6 +121,11 @@ void main(void)
 
     dwt_configure(&config);
 
+    dwt_txconfig_t txconfig = {.PGdly = 0xC0, .power = 0x1f1f1f1f};
+
+    dwt_configuretxrf(&txconfig);
+    dwt_setsmarttxpower(true);
+
     dwt_setleds(DWT_LEDS_ENABLE);
 
     dwt_setaddress16(DEVICE_ID);
@@ -133,8 +134,8 @@ void main(void)
     dwt_enableframefilter(DWT_FF_DATA_EN);
     dwt_setdblrxbuffmode(1);
 
-    dwt_settxantennadelay(21920);
-    dwt_setrxantennadelay(21920);
+    dwt_settxantennadelay(21875);
+    dwt_setrxantennadelay(21875);
 
     dwt_setcallbacks(uwb_txdone, uwb_rxok, uwb_rxto, uwb_rxerr, uwb_rxfrej);
 
@@ -161,6 +162,49 @@ void main(void)
     return;
 }
 
+K_CONDVAR_DEFINE(tx_condvar);
+
+void uwb_tx(struct tx_queue_t *tx_queue)
+{
+    // TURN OFF RECEIVER
+    if (dwt_read32bitreg(SYS_STATE_ID) & 0x0f00)
+        dwt_write8bitoffsetreg(SYS_CTRL_ID, SYS_CTRL_OFFSET, (uint8)SYS_CTRL_TRXOFF); // Disable the radio
+
+    // SET DELAYED TX TIMESTAMP
+    if (tx_queue->tx_details.tx_mode & DWT_START_TX_DELAYED)
+    {
+        uint64_t sys_time = get_sys_timestamp_u64();
+        uint64_t tx_timestamp = sys_time + (tx_queue->tx_details.tx_delay.reserved_time * UUS_TO_DWT_TIME);
+
+        tx_timestamp &= 0xffffffffffffff00;
+        uint32_t delay = tx_timestamp - tx_queue->tx_details.tx_delay.rx_timestamp;
+
+        memcpy(&(tx_queue->frame_buffer[10]), &delay, sizeof(uint32_t));
+        dwt_setdelayedtrxtime((uint32_t)(tx_timestamp >> 8));
+    }
+
+    // WRITE DATA TO TX BUFFER
+    dwt_writetxdata(tx_queue->frame_length, tx_queue->frame_buffer, 0);
+    dwt_writetxfctrl(tx_queue->frame_length, 0, tx_queue->tx_details.ranging);
+
+    // START TRANSMITTING
+    if ((dwt_starttx(tx_queue->tx_details.tx_mode) == DWT_SUCCESS) && (k_condvar_wait(&tx_condvar, &dwt_mutex, K_MSEC(1)) == 0))
+    {
+        uint64_t *timestamp_ptr = tx_queue->tx_details.tx_timestamp;
+        if (timestamp_ptr != NULL)
+        {
+            uint64_t timestamp = get_tx_timestamp_u64();
+            *timestamp_ptr = timestamp;
+        }
+    }
+    else
+    {
+        printf("Tx fail\n\r");
+        dwt_forcetrxoff();
+        dwt_rxenable(DWT_START_RX_IMMEDIATE);
+    }
+}
+
 // RECIEVE THREAD
 void uwb_rx_thread(void)
 {
@@ -185,8 +229,6 @@ void uwb_rx_thread(void)
     }
 }
 
-K_CONDVAR_DEFINE(tx_condvar);
-
 // TRANSMIT THREAD
 void uwb_tx_thread(void)
 {
@@ -199,52 +241,16 @@ void uwb_tx_thread(void)
     while (1)
     {
         // GET DATA FOR TRANSMITTING THROUGH QUEUE
-        struct tx_queue_t *data_tx = (struct tx_queue_t *)k_fifo_get(&tx_fifo, K_FOREVER);
+        struct tx_queue_t *tx_queue = (struct tx_queue_t *)k_fifo_get(&tx_fifo, K_FOREVER);
 
         k_mutex_lock(&dwt_mutex, K_FOREVER);
 
-        // TURN OFF RECEIVER
-        if (dwt_read32bitreg(SYS_STATE_ID) & 0x0f00)
-            dwt_write8bitoffsetreg(SYS_CTRL_ID, SYS_CTRL_OFFSET, (uint8)SYS_CTRL_TRXOFF); // Disable the radio
-
-        // SET DELAYED TX TIMESTAMP
-        if (data_tx->tx_details.tx_mode & DWT_START_TX_DELAYED)
-        {
-            uint64_t sys_time = get_sys_timestamp_u64();
-            uint64_t tx_timestamp = sys_time + (data_tx->tx_details.tx_delay.reserved_time * UUS_TO_DWT_TIME);
-
-            tx_timestamp &= 0xffffffffffffff00;
-            uint32_t delay = tx_timestamp - data_tx->tx_details.tx_delay.rx_timestamp;
-
-            memcpy(&(data_tx->frame_buffer[10]), &delay, sizeof(uint32_t));
-            dwt_setdelayedtrxtime((uint32_t)(tx_timestamp >> 8));
-        }
-
-        // WRITE DATA TO TX BUFFER
-        dwt_writetxdata(data_tx->frame_length, data_tx->frame_buffer, 0);
-        dwt_writetxfctrl(data_tx->frame_length, 0, data_tx->tx_details.ranging);
-
-        // START TRANSMITTING
-        if ((dwt_starttx(data_tx->tx_details.tx_mode) == DWT_SUCCESS) && (k_condvar_wait(&tx_condvar, &dwt_mutex, K_MSEC(1)) == 0))
-        {
-            uint64_t *timestamp_ptr = data_tx->tx_details.tx_timestamp;
-            if (timestamp_ptr != NULL)
-            {
-                uint64_t timestamp = get_tx_timestamp_u64();
-                *timestamp_ptr = timestamp;
-            }
-        }
-        else
-        {
-            printf("Tx fail\n\r");
-            dwt_forcetrxoff();
-            dwt_rxenable(DWT_START_RX_IMMEDIATE);
-        }
+        uwb_tx(tx_queue);
 
         // UNLOCK THE MTX AND FREE THE DATA
         k_mutex_unlock(&dwt_mutex);
-        k_free(data_tx->frame_buffer);
-        k_free(data_tx);
+        k_free(tx_queue->frame_buffer);
+        k_free(tx_queue);
     }
 }
 
@@ -282,18 +288,12 @@ void uwb_rxok(const dwt_cb_data_t *data)
     uint64_t rx_ts = get_rx_timestamp_u64();
     dwt_readrxdata(buffer_rx, msg_length, 0);
 
-    struct rx_details_t rx_details = {.carrier_integrator = integrator, .rx_timestamp = rx_ts};
+    struct rx_details_t rx_details = {.carrier_integrator = integrator, .rx_timestamp = rx_ts, .rx_power = data->rx_power};
 
     // INIT QUEUE DATA AND SEND TO RX THREAD THROUGH QUEUE
 
     struct mac_data_t mac_data;
     int mac_lenght = decode_MAC(&mac_data, buffer_rx);
-
-    if (mac_data.pan_id != PAN_ID || (mac_data.destination_id != DEVICE_ID && mac_data.destination_id != 0xffff))
-    {
-        k_free(buffer_rx);
-        return;
-    }
 
     struct rx_queue_t *queue = k_malloc(sizeof(struct rx_queue_t));
     queue->mac_data = mac_data;
@@ -323,49 +323,4 @@ void dwm_int_callback(const struct device *dev, struct gpio_callback *cb, uint32
 {
     k_sem_give(&isr_semaphore);
     return;
-}
-
-// GET RX TIMESTAMP IN 40-BIT FORMAT
-static uint64_t get_rx_timestamp_u64(void)
-{
-    uint8 ts_tab[5];
-    uint64_t ts = 0;
-    int i;
-    dwt_readrxtimestamp(ts_tab);
-    for (i = 4; i >= 0; i--)
-    {
-        ts = (ts << 8) + ts_tab[i];
-    }
-    ts &= (uint64_t)0x000000ffffffffff;
-    return ts;
-}
-
-// GET TX TIMESTAMP IN 40-BIT FORMAT
-static uint64_t get_tx_timestamp_u64(void)
-{
-    uint8 ts_tab[5];
-    uint64_t ts = 0;
-    int i;
-    dwt_readtxtimestamp(ts_tab);
-    for (i = 4; i >= 0; i--)
-    {
-        ts = (ts << 8) + ts_tab[i];
-    }
-    ts &= (uint64_t)0x000000ffffffffff;
-    return ts;
-}
-
-// GET TX TIMESTAMP IN 40-BIT FORMAT
-static uint64_t get_sys_timestamp_u64(void)
-{
-    uint8 ts_tab[5];
-    uint64_t ts = 0;
-    int i;
-    dwt_readsystime(ts_tab);
-    for (i = 4; i >= 0; i--)
-    {
-        ts = (ts << 8) + ts_tab[i];
-    }
-    ts &= (uint64_t)0x000000ffffffffff;
-    return ts;
 }
