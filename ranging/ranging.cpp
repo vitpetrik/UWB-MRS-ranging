@@ -15,6 +15,9 @@
 #include <math.h>
 #include "mac.h"
 
+#define INTEGRATOR_ALPHA 1
+#define DISTANCE_ALPHA 1
+
 extern uint16_t DEVICE_ID;
 extern uint16_t PAN_ID;
 
@@ -27,6 +30,8 @@ typedef std::unordered_map<uint32_t, struct device_t *> devices_map_t;
 devices_map_t devices_map;
 
 K_SEM_DEFINE(print_ranging_semaphore, 0, 1);
+
+
 
 int rx_message(struct rx_queue_t *queue_data)
 {
@@ -115,7 +120,7 @@ int rx_ranging_init(const uint16_t source_id, void *msg, struct rx_details_t *rx
         .ranging = 1,
         .tx_mode = DWT_START_TX_DELAYED | DWT_RESPONSE_EXPECTED,
         .tx_timestamp = NULL,
-        .tx_delay = {.rx_timestamp = rx_details->rx_timestamp, .reserved_time = 750}};
+        .tx_delay = {.rx_timestamp = rx_details->rx_timestamp, .reserved_time = 500}};
 
     tx_message(source_id, DATA, RANGING_RESPONSE_MSG, (const uint8_t *)NULL, 0, &tx_details);
 
@@ -132,7 +137,7 @@ int rx_ranging_response(const uint16_t source_id, void *msg, struct rx_details_t
     if (device->ranging.counter < 1)
         device->ranging.integrator = rx_details->carrier_integrator;
     else
-        device->ranging.integrator = 0.10 * rx_details->carrier_integrator + (1 - 0.10)*device->ranging.integrator;
+        device->ranging.integrator = INTEGRATOR_ALPHA * rx_details->carrier_integrator + (1 - INTEGRATOR_ALPHA) * device->ranging.integrator;
 
     double clockOffsetRatio = device->ranging.integrator * (FREQ_OFFSET_MULTIPLIER * HERTZ_TO_PPM_MULTIPLIER_CHAN_5 / 1.0e6);
 
@@ -153,15 +158,19 @@ int rx_ranging_response(const uint16_t source_id, void *msg, struct rx_details_t
     double diff = timespan - (1 - clockOffsetRatio) * rx_details->tx_delay;
 
     double tof = (diff / 2.) * DWT_TIME_UNITS;
-    double dist = tof * SPEED_OF_LIGHT;
+    double dist = tof * SPEED_OF_LIGHT + 0.09;
 
-    if (device->ranging.counter < 10 || abs(dist - device->ranging.distance) < 100)
-    {
+    if (device->ranging.counter < 1)
         device->ranging.distance = dist;
-        device->ranging.new_data = true;
+    else
+        device->ranging.distance = DISTANCE_ALPHA * dist + (1 - DISTANCE_ALPHA) * device->ranging.distance;
 
-        k_sem_give(&print_ranging_semaphore);
-    }
+    device->ranging.rx_power = rx_details->rx_power;
+
+    printf("%g, %f, %i, %lu, %u\n\r", device->ranging.distance, rx_details->rx_power, rx_details->carrier_integrator, timespan, rx_details->tx_delay);
+
+    device->ranging.new_data = true;
+    k_sem_give(&print_ranging_semaphore);
 
     device->ranging.counter++;
 
@@ -185,7 +194,7 @@ void uwb_beacon_thread(void)
     while (1)
     {
         // ALLOCATE MEMORY FOR BUFFER AND QUEUE DATA
-        printf("Sending beacon message!\n\r");
+        // printf("Sending beacon message!\n\r");
 
         struct tx_details_t tx_details = {
             .ranging = 0,
@@ -213,7 +222,7 @@ void uwb_ranging_thread(void)
 
     while (devices_map.empty())
         sleep_ms(100);
-
+    printf("\033\143");
     while (1)
     {
         for (auto node : devices_map)
@@ -238,12 +247,13 @@ void uwb_ranging_print_thread(void)
     k_tid_t thread_id = k_current_get();
     printf("Ranging print thread started\n\r");
 
+    return;
+
     while (devices_map.empty())
         sleep_ms(100);
 
     while (1)
     {
-        // k_sem_take(&print_ranging_semaphore, K_FOREVER);
         printf("\033\143");
 
         printf("----------RANGING RESULTS----------\n\r");
@@ -255,15 +265,13 @@ void uwb_ranging_print_thread(void)
             if (device->ranging.new_data)
             {
                 printf("\33[32m");
-                printf(" · Distance to node 0x%X: %.2f m\n\r", device->id, device->ranging.distance);
-                printf("\33[39m");
             }
             else
             {
                 printf("\33[31m");
-                printf(" · Distance to node 0x%X: %.2f m\n\r", device->id, device->ranging.distance);
-                printf("\33[39m");
             }
+            printf(" · Distance to node 0x%X: %.2f m | %.2f dBm\n\r", device->id, device->ranging.distance, device->ranging.rx_power);
+            printf("\33[39m");
 
             device->ranging.new_data = false;
         }
