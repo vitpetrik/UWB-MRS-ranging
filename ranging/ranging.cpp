@@ -167,7 +167,7 @@ int rx_ranging_response(const uint16_t source_id, void *msg, struct rx_details_t
 
     device->ranging.rx_power = rx_details->rx_power;
 
-    printf("%g, %f, %i, %lu, %u\n\r", device->ranging.distance, rx_details->rx_power, rx_details->carrier_integrator, timespan, rx_details->tx_delay);
+    printf("%g, %f, %i, %lu, %u\n", device->ranging.distance, rx_details->rx_power, rx_details->carrier_integrator, timespan, rx_details->tx_delay);
 
     device->ranging.new_data = true;
     k_sem_give(&print_ranging_semaphore);

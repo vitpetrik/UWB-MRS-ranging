@@ -121,7 +121,7 @@ void main(void)
 
     dwt_configure(&config);
 
-    dwt_txconfig_t txconfig = {.PGdly = 0xC0, .power = 0x1f1f1f1f};
+    dwt_txconfig_t txconfig = {.PGdly = 0xC0, .power = 0x25466788};
 
     dwt_configuretxrf(&txconfig);
     dwt_setsmarttxpower(true);
