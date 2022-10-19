@@ -31,8 +31,6 @@ devices_map_t devices_map;
 
 K_SEM_DEFINE(print_ranging_semaphore, 0, 1);
 
-
-
 int rx_message(struct rx_queue_t *queue_data)
 {
     int source_id = queue_data->mac_data.source_id;
@@ -122,7 +120,8 @@ int rx_ranging_init(const uint16_t source_id, void *msg, struct rx_details_t *rx
         .tx_timestamp = NULL,
         .tx_delay = {.rx_timestamp = rx_details->rx_timestamp, .reserved_time = 500}};
 
-    tx_message(source_id, DATA, RANGING_RESPONSE_MSG, (const uint8_t *)NULL, 0, &tx_details);
+    tx_message(source_id, DATA, RANGING_RESPONSE_MSG, (const uint8_t *)&(rx_details->carrier_integrator), sizeof(int32_t), &tx_details);
+    // tx_message(source_id, DATA, RANGING_RESPONSE_MSG, (const uint8_t *) NULL, 0, &tx_details);
 
     return 0;
 }
@@ -134,10 +133,18 @@ int rx_ranging_response(const uint16_t source_id, void *msg, struct rx_details_t
 
     struct device_t *device = (struct device_t *)devices_map[source_id];
 
+    int32_t responder_integrator;
+    memcpy(&responder_integrator, msg, sizeof(int32_t));
+
+    int32_t integrator = (rx_details->carrier_integrator - responder_integrator) >> 1;
+    
+    
+    // int32_t integrator = rx_details->carrier_integrator;
+
     if (device->ranging.counter < 1)
-        device->ranging.integrator = rx_details->carrier_integrator;
+        device->ranging.integrator = integrator;
     else
-        device->ranging.integrator = INTEGRATOR_ALPHA * rx_details->carrier_integrator + (1 - INTEGRATOR_ALPHA) * device->ranging.integrator;
+        device->ranging.integrator = INTEGRATOR_ALPHA * integrator + (1 - INTEGRATOR_ALPHA) * device->ranging.integrator;
 
     double clockOffsetRatio = device->ranging.integrator * (FREQ_OFFSET_MULTIPLIER * HERTZ_TO_PPM_MULTIPLIER_CHAN_5 / 1.0e6);
 
@@ -167,7 +174,7 @@ int rx_ranging_response(const uint16_t source_id, void *msg, struct rx_details_t
 
     device->ranging.rx_power = rx_details->rx_power;
 
-    printf("%g, %f, %i, %lu, %u\n", device->ranging.distance, rx_details->rx_power, rx_details->carrier_integrator, timespan, rx_details->tx_delay);
+    printf("%g, %f, %i, %lu, %u\n", device->ranging.distance, rx_details->rx_power, integrator, timespan, rx_details->tx_delay);
 
     device->ranging.new_data = true;
     k_sem_give(&print_ranging_semaphore);
