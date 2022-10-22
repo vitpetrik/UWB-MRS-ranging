@@ -27,6 +27,8 @@ extern struct k_fifo tx_fifo;
 extern struct k_fifo rx_fifo;
 
 typedef std::unordered_map<uint32_t, struct device_t *> devices_map_t;
+typedef std::unordered_map<uint16_t, uint64_t *> tx_timestamps_map_t;
+tx_timestamps_map_t tx_timestamps_map;
 devices_map_t devices_map;
 
 K_SEM_DEFINE(print_ranging_semaphore, 0, 1);
@@ -48,6 +50,9 @@ int rx_message(struct rx_queue_t *queue_data)
         break;
     case RANGING_RESPONSE_MSG:
         status = rx_ranging_response(source_id, (void *)queue_data->buffer_rx, rx_details);
+        break;
+    case RANGING_DS_MSG:
+        status = rx_ranging_ds(source_id, (void *)queue_data->buffer_rx, rx_details);
         break;
     default:
         printf("Unknown message type\n\r");
@@ -137,8 +142,8 @@ int rx_ranging_response(const uint16_t source_id, void *msg, struct rx_details_t
     memcpy(&responder_integrator, msg, sizeof(int32_t));
 
     int32_t integrator = (rx_details->carrier_integrator - responder_integrator) >> 1;
-    
-    
+
+
     // int32_t integrator = rx_details->carrier_integrator;
 
     if (device->ranging.counter < 1)
@@ -180,6 +185,70 @@ int rx_ranging_response(const uint16_t source_id, void *msg, struct rx_details_t
     k_sem_give(&print_ranging_semaphore);
 
     device->ranging.counter++;
+
+    return 0;
+}
+
+float ToF_DS(float Ra, float Da, float Rb, float Db)
+{
+    float tof = (float) DWT_TIME_UNITS*(Ra * Rb - Da * Db) / (2 * (Ra + Db));
+
+    return tof;
+}
+
+int rx_ranging_ds(const uint16_t source_id, void *msg, struct rx_details_t *queue_data)
+{
+    uint32_t *msg_uint32_t = (uint32_t *)msg;
+    uint32_t buffer_tx[3];
+
+    uint32_t Ra = 0, Da = 0, Rb = 0, Db = queue_data->tx_delay;
+
+    memcpy(&Rb, &(msg_uint32_t[0]), sizeof(uint32_t));
+    memcpy(&Ra, &(msg_uint32_t[1]), sizeof(uint32_t));
+    memcpy(&Da, &(msg_uint32_t[2]), sizeof(uint32_t));
+
+    if (not tx_timestamps_map.contains(source_id))
+    {
+        uint64_t *timestamp_ptr = (uint64_t *)k_malloc(sizeof(uint64_t));
+        *timestamp_ptr = 0;
+
+        tx_timestamps_map[source_id] = timestamp_ptr;
+    }
+    else
+    {
+        uint64_t rx_timestamp = queue_data->rx_timestamp;
+        uint64_t tx_timestamp = *(tx_timestamps_map[source_id]);
+
+        if (rx_timestamp > tx_timestamp)
+            Ra = rx_timestamp - tx_timestamp;
+        else
+            Ra = rx_timestamp + (0x000000ffffffffffU - tx_timestamp);
+    }
+
+
+    struct tx_details_t tx_details = {
+        .ranging = 1,
+        .tx_mode = DWT_START_TX_DELAYED | DWT_RESPONSE_EXPECTED,
+        .tx_timestamp = tx_timestamps_map[source_id],
+        .tx_delay = {.rx_timestamp = queue_data->rx_timestamp, .reserved_time = 500}};
+
+    memcpy(&(buffer_tx[0]), &Ra, sizeof(uint32_t));
+    memcpy(&(buffer_tx[1]), &Rb, sizeof(uint32_t));
+    memcpy(&(buffer_tx[2]), &Db, sizeof(uint32_t));
+
+    tx_message(source_id, DATA, RANGING_DS_MSG, (const uint8_t *)buffer_tx, 3 * sizeof(uint32_t), &tx_details);
+
+    if (Ra != 0 && Da != 0 && Rb != 0 && Db != 0)
+    {
+        float tof = ToF_DS(Ra, Da, Rb, Db);
+        float dist = SPEED_OF_LIGHT * tof;
+        printf("Time: %u ms ", k_uptime_get_32());
+        printf("Dist %.2f\n\r", dist);
+    }
+    else
+    {
+        printf("Some numbers are set to 0\n\r");
+    }
 
     return 0;
 }
@@ -236,14 +305,28 @@ void uwb_ranging_thread(void)
         {
             struct device_t *device = (struct device_t *)node.second;
 
+            if (not tx_timestamps_map.contains(device->id))
+            {
+                uint64_t *timestamp_ptr = (uint64_t *)k_malloc(sizeof(uint64_t));
+                *timestamp_ptr = 0;
+
+                tx_timestamps_map[device->id] = timestamp_ptr;
+            }
+            else
+            {
+                continue;
+            }
+
+            uint32_t empty[3] = {0,0,0};
+
             struct tx_details_t tx_details = {
                 .ranging = 1,
                 .tx_mode = DWT_START_TX_IMMEDIATE | DWT_RESPONSE_EXPECTED,
-                .tx_timestamp = &(device->ranging.tx_timestamp)};
+                .tx_timestamp = tx_timestamps_map[device->id]};
 
-            tx_message(device->id, DATA, RANGING_INIT_MSG, NULL, 0, &tx_details);
+            tx_message(device->id, DATA, RANGING_DS_MSG, (uint8_t*) empty, 3*sizeof(uint32_t), &tx_details);
 
-            sleep_ms(100);
+        sleep_ms(100);
         }
     }
 }

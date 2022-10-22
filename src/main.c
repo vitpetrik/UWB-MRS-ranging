@@ -131,7 +131,7 @@ void main(void)
     dwt_setaddress16(DEVICE_ID);
     dwt_setpanid(PAN_ID);
 
-    dwt_enableframefilter(DWT_FF_DATA_EN);
+    dwt_enableframefilter(DWT_FF_DATA_EN, true);
     dwt_setdblrxbuffmode(1);
 
     dwt_settxantennadelay(21875);
@@ -139,7 +139,8 @@ void main(void)
 
     dwt_setcallbacks(uwb_txdone, uwb_rxok, uwb_rxto, uwb_rxerr, uwb_rxfrej);
 
-    dwt_setinterrupt(DWT_INT_TFRS | DWT_INT_RFCG | DWT_INT_ARFE, 1);
+    // dwt_setinterrupt(DWT_INT_TFRS | DWT_INT_RFCG | DWT_INT_ARFE, 1);
+    dwt_setinterrupt(DWT_INT_TFRS | DWT_INT_RFCG, 1);
     dwt_enable_interrupt();
 
     k_mutex_unlock(&dwt_mutex);
@@ -277,8 +278,8 @@ void uwb_rxfrej(const dwt_cb_data_t *data)
 void uwb_rxok(const dwt_cb_data_t *data)
 {
     //! READ the integrator first - after rxenable the value gets overwritten
-    int32_t integrator = dwt_readcarrierintegrator();
-    dwt_rxenable(DWT_START_RX_IMMEDIATE | DWT_NO_SYNC_PTRS);
+    // int32_t integrator = dwt_readcarrierintegrator();
+    // dwt_rxenable(DWT_START_RX_IMMEDIATE | DWT_NO_SYNC_PTRS);
 
     // INIT DATA
     uint16_t msg_length = data->datalength;
@@ -288,7 +289,7 @@ void uwb_rxok(const dwt_cb_data_t *data)
     uint64_t rx_ts = get_rx_timestamp_u64();
     dwt_readrxdata(buffer_rx, msg_length, 0);
 
-    struct rx_details_t rx_details = {.carrier_integrator = integrator, .rx_timestamp = rx_ts, .rx_power = data->rx_power};
+    struct rx_details_t rx_details = {.carrier_integrator = 0, .rx_timestamp = rx_ts, .rx_power = data->rx_power};
 
     // INIT QUEUE DATA AND SEND TO RX THREAD THROUGH QUEUE
 

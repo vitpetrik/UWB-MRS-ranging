@@ -25,7 +25,8 @@ enum
 {
     BEACON_MSG,
     RANGING_INIT_MSG,
-    RANGING_RESPONSE_MSG
+    RANGING_RESPONSE_MSG,
+    RANGING_DS_MSG,
 };
 
 enum
@@ -50,6 +51,7 @@ extern "C"
     int rx_beacon(const uint16_t source_id, void *msg);
     int rx_ranging_init(const uint16_t source_id, void *msg, struct rx_details_t *queue_data);
     int rx_ranging_response(const uint16_t source_id, void *msg, struct rx_details_t *queue_data);
+    int rx_ranging_ds(const uint16_t source_id, void *msg, struct rx_details_t *queue_data);
 
 #ifdef __cplusplus
 }
