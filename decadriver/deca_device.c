@@ -1425,7 +1425,7 @@ void dwt_write32bitoffsetreg(int regFileID, int regOffset, uint32 regval)
  *
  * no return value
  */
-void dwt_enableframefilter(uint16 enable)
+void dwt_enableframefilter(uint16 enable, uint16 rxautr)
 {
     uint32 sysconfig = SYS_CFG_MASK & dwt_read32bitreg(SYS_CFG_ID); // Read sysconfig register
 
@@ -1438,6 +1438,15 @@ void dwt_enableframefilter(uint16 enable)
     else
     {
         sysconfig &= ~(SYS_CFG_FFE);
+    }
+
+    if(rxautr)
+    {
+        sysconfig |= SYS_CFG_RXAUTR;
+    }
+    else
+    {
+        sysconfig &= ~SYS_CFG_RXAUTR;
     }
 
     pdw1000local->sysCFGreg = sysconfig;

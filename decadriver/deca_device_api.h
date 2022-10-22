@@ -1321,7 +1321,7 @@ void dwt_otpread(uint16 address, uint32 *array, uint8 length);
  *
  * no return value
  */
-void dwt_enableframefilter(uint16 bitmask);
+void dwt_enableframefilter(uint16 bitmask, uint16 rxautr);
 
 /*! ------------------------------------------------------------------------------------------------------------------
  * @fn dwt_enableautoack()
