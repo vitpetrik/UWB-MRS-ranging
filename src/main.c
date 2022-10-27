@@ -167,10 +167,6 @@ K_CONDVAR_DEFINE(tx_condvar);
 
 void uwb_tx(struct tx_queue_t *tx_queue)
 {
-    // TURN OFF RECEIVER
-    if (dwt_read32bitreg(SYS_STATE_ID) & 0x0f00)
-        dwt_write8bitoffsetreg(SYS_CTRL_ID, SYS_CTRL_OFFSET, (uint8)SYS_CTRL_TRXOFF); // Disable the radio
-
     // SET DELAYED TX TIMESTAMP
     if (tx_queue->tx_details.tx_mode & DWT_START_TX_DELAYED)
     {
@@ -188,6 +184,8 @@ void uwb_tx(struct tx_queue_t *tx_queue)
     dwt_writetxdata(tx_queue->frame_length, tx_queue->frame_buffer, 0);
     dwt_writetxfctrl(tx_queue->frame_length, 0, tx_queue->tx_details.ranging);
 
+    // TURN OFF RECEIVER
+    dwt_write8bitoffsetreg(SYS_CTRL_ID, SYS_CTRL_OFFSET, (uint8)SYS_CTRL_TRXOFF); // Disable the radio
     // START TRANSMITTING
     if ((dwt_starttx(tx_queue->tx_details.tx_mode) == DWT_SUCCESS) && (k_condvar_wait(&tx_condvar, &dwt_mutex, K_MSEC(1)) == 0))
     {

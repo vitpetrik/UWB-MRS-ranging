@@ -67,6 +67,7 @@ struct ranging_t
     uint8_t new_data;
     uint64_t tx_timestamp;
     uint64_t rx_timestamp;
+    uint32_t last_meas_time;
     int32_t counter;
     int32_t integrator;
     float rx_power;
