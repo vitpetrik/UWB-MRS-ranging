@@ -12,7 +12,11 @@
         "pb.h": "c",
         "common_types.h": "c",
         "common_macro.h": "c",
-        "__assert.h": "c"
+        "__assert.h": "c",
+        "array": "cpp",
+        "string_view": "cpp",
+        "ranges": "cpp",
+        "math.h": "c"
     },
     "cortex-debug.variableUseNaturalFormat": false
 }
