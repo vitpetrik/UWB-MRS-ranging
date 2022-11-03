@@ -64,8 +64,14 @@ int rx_message(struct rx_queue_t *queue_data)
 void tx_message(const uint16_t destination_id, const frame_type_t frame_type, const int msg_type, const uint8_t *msg, int len, tx_details_t *tx_details)
 {
     // ALLOCATE MEMORY FOR tx BUFFER AND QUEUE DATA
-    uint8_t *buffer_tx = (uint8_t *)k_malloc(10 + 4 + len + 2);
-    struct tx_queue_t *queue_data = (struct tx_queue_t *)k_malloc(sizeof(struct tx_queue_t));
+    uint8_t *buffer_tx = (uint8_t *)k_calloc(10 + 4 + len + 2, sizeof(uint8_t));
+    struct tx_queue_t *queue_data = (struct tx_queue_t *)k_calloc(1, sizeof(struct tx_queue_t));
+
+    if (buffer_tx == NULL || queue_data == NULL)
+    {
+        k_free(buffer_tx);
+        k_free(queue_data);
+    }
 
     struct mac_data_t mac_data = {
         .frame_ctrl = 0x9840 | frame_type,
@@ -104,7 +110,11 @@ int rx_beacon(const uint16_t source_id, void *msg)
 
     if (not devices_map.contains(source_id))
     {
-        devices_map[source_id] = (struct device_t *)k_malloc(sizeof(struct device_t));
+        struct device_t *dev_ptr = (struct device_t *)k_calloc(1, sizeof(struct device_t));
+        if (dev_ptr == NULL)
+            return 0;
+
+        devices_map[source_id] = dev_ptr;
         devices_map[source_id]->ranging = {0, 0, 0, 0, 0, 0, 0};
     }
     struct device_t *device = devices_map[source_id];
@@ -125,8 +135,8 @@ int rx_ranging_init(const uint16_t source_id, void *msg, struct rx_details_t *rx
         .tx_timestamp = NULL,
         .tx_delay = {.rx_timestamp = rx_details->rx_timestamp, .reserved_time = 500}};
 
-    tx_message(source_id, DATA, RANGING_RESPONSE_MSG, (const uint8_t *)&(rx_details->carrier_integrator), sizeof(int32_t), &tx_details);
-    // tx_message(source_id, DATA, RANGING_RESPONSE_MSG, (const uint8_t *) NULL, 0, &tx_details);
+    // tx_message(source_id, DATA, RANGING_RESPONSE_MSG, (const uint8_t *)&(rx_details->carrier_integrator), sizeof(int32_t), &tx_details);
+    tx_message(source_id, DATA, RANGING_RESPONSE_MSG, (const uint8_t *)NULL, 0, &tx_details);
 
     return 0;
 }
@@ -142,9 +152,6 @@ int rx_ranging_response(const uint16_t source_id, void *msg, struct rx_details_t
     memcpy(&responder_integrator, msg, sizeof(int32_t));
 
     int32_t integrator = (rx_details->carrier_integrator - responder_integrator) >> 1;
-
-
-    // int32_t integrator = rx_details->carrier_integrator;
 
     if (device->ranging.counter < 1)
         device->ranging.integrator = integrator;
@@ -191,7 +198,7 @@ int rx_ranging_response(const uint16_t source_id, void *msg, struct rx_details_t
 
 float ToF_DS(float Ra, float Da, float Rb, float Db)
 {
-    float tof = (float) DWT_TIME_UNITS*(Ra * Rb - Da * Db) / (2 * (Ra + Db));
+    float tof = (float)DWT_TIME_UNITS * (Ra * Rb - Da * Db) / (2 * (Ra + Db));
 
     return tof;
 }
@@ -207,13 +214,23 @@ int rx_ranging_ds(const uint16_t source_id, void *msg, struct rx_details_t *queu
     memcpy(&Ra, &(msg_uint32_t[1]), sizeof(uint32_t));
     memcpy(&Da, &(msg_uint32_t[2]), sizeof(uint32_t));
 
-    if(Rb == 0 && Ra == 0 && Da == 0)
+    if (not devices_map.count(source_id))
     {
-        if (not devices_map.count(source_id))
-        {
-            devices_map[source_id] = (struct device_t *)k_malloc(sizeof(struct device_t));
-        }
-        devices_map[source_id]->ranging = {0, 0, 0, 0, 0, 0, 0};
+        struct device_t *dev_ptr = (struct device_t *)k_calloc(1, sizeof(struct device_t));
+
+        if (dev_ptr == NULL)
+            return 0;
+
+        dev_ptr->id = source_id;
+
+        dev_ptr->ranging.last_meas_time = k_uptime_get_32();
+        devices_map[source_id] = dev_ptr;
+    }
+
+    if (Rb == 0 && Ra == 0 && Da == 0)
+    {
+        devices_map[source_id]->ranging.tx_timestamp = 0;
+        devices_map[source_id]->ranging.rx_timestamp = 0;
     }
     else
     {
@@ -248,7 +265,7 @@ int rx_ranging_ds(const uint16_t source_id, void *msg, struct rx_details_t *queu
     float tof = ToF_DS(Ra, Da, Rb, Db);
     float dist = SPEED_OF_LIGHT * tof;
 
-    if (abs(dist) >1000)
+    if (abs(dist) > 1000)
     {
         return 0;
         // uint64_t tx_timestamp = devices_map[source_id]->ranging.tx_timestamp;
@@ -281,7 +298,6 @@ void uwb_beacon_thread(void)
     printf("Starting beacon thread\n\r");
 
     // INIT MESSAGE
-
     beacon_msg beacon = {.uav_type = UAV_TYPE_DEFAULT,
                          .GPS = {50.4995652542, 13.4499037391}};
 
@@ -307,35 +323,29 @@ void uwb_beacon_thread(void)
 // RANGING THREAD
 void uwb_ranging_thread(void)
 {
-    k_tid_t thread_id = k_current_get();
-    k_thread_suspend(thread_id);
-
     printf("Ranging thread started\n\r");
 
-    while (devices_map.empty())
-        sleep_ms(100);
-    printf("\033\143");
     while (1)
     {
         for (auto node : devices_map)
         {
+            uint32_t device_id = node.first;
             struct device_t *device = (struct device_t *)node.second;
 
-            if((k_uptime_get_32() - devices_map[device->id]->ranging.last_meas_time) < 50)
+            if ((k_uptime_get_32() - device->ranging.last_meas_time) < 50)
                 continue;
 
-            devices_map[device->id]->ranging.last_meas_time = k_uptime_get_32();
-            devices_map[device->id]->ranging.tx_timestamp = 0;
+            device->ranging.last_meas_time = k_uptime_get_32();
+            device->ranging.tx_timestamp = 0;
 
-            uint32_t empty[3] = {0,0,0};
+            uint32_t empty[3] = {0, 0, 0};
 
             struct tx_details_t tx_details = {
                 .ranging = 1,
                 .tx_mode = DWT_START_TX_IMMEDIATE | DWT_RESPONSE_EXPECTED,
-                .tx_timestamp =  &(devices_map[device->id]->ranging.tx_timestamp)};
+                .tx_timestamp = &(device->ranging.tx_timestamp)};
 
-            tx_message(device->id, DATA, RANGING_DS_MSG, (uint8_t*) empty, 3*sizeof(uint32_t), &tx_details);
-
+            tx_message(device_id, DATA, RANGING_DS_MSG, (uint8_t *)empty, 3 * sizeof(uint32_t), &tx_details);
         }
         sleep_ms(10);
     }

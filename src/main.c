@@ -148,9 +148,8 @@ void main(void)
     printf("Settings done!\n\r");
 
     // START THE THREADS
-    k_thread_resume(uwb_rx_thr);
     k_thread_resume(uwb_tx_thr);
-    sleep_ms(500);
+    k_thread_resume(uwb_rx_thr);
     k_thread_resume(uwb_beacon_thr);
     k_thread_resume(uwb_ranging_thr);
 
@@ -175,6 +174,8 @@ void uwb_tx(struct tx_queue_t *tx_queue)
 
         tx_timestamp &= 0xffffffffffffff00;
         uint32_t delay = tx_timestamp - tx_queue->tx_details.tx_delay.rx_timestamp;
+
+        tx_timestamp %= 0x000000ffffffffffU;
 
         memcpy(&(tx_queue->frame_buffer[10]), &delay, sizeof(uint32_t));
         dwt_setdelayedtrxtime((uint32_t)(tx_timestamp >> 8));
@@ -281,7 +282,10 @@ void uwb_rxok(const dwt_cb_data_t *data)
 
     // INIT DATA
     uint16_t msg_length = data->datalength;
-    uint8_t *buffer_rx = k_malloc(msg_length);
+    uint8_t *buffer_rx = k_calloc(msg_length, sizeof(uint8_t));
+
+    if (buffer_rx == NULL)
+        return;
 
     // READ THE DATA AND ENABLE RX
     uint64_t rx_ts = get_rx_timestamp_u64();
@@ -294,7 +298,11 @@ void uwb_rxok(const dwt_cb_data_t *data)
     struct mac_data_t mac_data;
     int mac_lenght = decode_MAC(&mac_data, buffer_rx);
 
-    struct rx_queue_t *queue = k_malloc(sizeof(struct rx_queue_t));
+    struct rx_queue_t *queue = k_calloc(1, sizeof(struct rx_queue_t));
+
+    if (queue == NULL)
+        return;
+
     queue->mac_data = mac_data;
     queue->buffer_rx = buffer_rx + mac_lenght;
     queue->buffer_rx_free_ptr = buffer_rx;
