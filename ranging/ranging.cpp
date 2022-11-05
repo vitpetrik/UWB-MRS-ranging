@@ -1,5 +1,5 @@
 #include <zephyr/zephyr.h>
-#include <sys/__assert.h>
+#include <zephyr/sys/__assert.h>
 #include <string.h>
 
 #include <pb_encode.h>
@@ -65,7 +65,10 @@ void tx_message(const uint16_t destination_id, const frame_type_t frame_type, co
 {
     // ALLOCATE MEMORY FOR tx BUFFER AND QUEUE DATA
     uint8_t *buffer_tx = (uint8_t *)k_calloc(10 + 4 + len + 2, sizeof(uint8_t));
+    __ASSERT_NO_MSG(buffer_tx != NULL);
+
     struct tx_queue_t *queue_data = (struct tx_queue_t *)k_calloc(1, sizeof(struct tx_queue_t));
+    __ASSERT_NO_MSG(queue_data != NULL);
 
     if (buffer_tx == NULL || queue_data == NULL)
     {
@@ -111,8 +114,8 @@ int rx_beacon(const uint16_t source_id, void *msg)
     if (not devices_map.contains(source_id))
     {
         struct device_t *dev_ptr = (struct device_t *)k_calloc(1, sizeof(struct device_t));
-        if (dev_ptr == NULL)
-            return 0;
+        __ASSERT_NO_MSG(dev_ptr != NULL);
+
 
         devices_map[source_id] = dev_ptr;
         devices_map[source_id]->ranging = {0, 0, 0, 0, 0, 0, 0};
@@ -217,9 +220,8 @@ int rx_ranging_ds(const uint16_t source_id, void *msg, struct rx_details_t *queu
     if (not devices_map.count(source_id))
     {
         struct device_t *dev_ptr = (struct device_t *)k_calloc(1, sizeof(struct device_t));
+        __ASSERT_NO_MSG(dev_ptr != NULL);
 
-        if (dev_ptr == NULL)
-            return 0;
 
         dev_ptr->id = source_id;
 

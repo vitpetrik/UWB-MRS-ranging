@@ -110,13 +110,9 @@ void main(void)
     dwt_hardinterrupt(dwm_int_callback);
 
     dwt_spi_set_rate_slow();
-    if (dwt_initialise(DWT_LOADUCODE) == DWT_ERROR)
-    {
-        printf("INIT FAILED");
-        while (1)
-        {
-        };
-    }
+
+    __ASSERT_NO_MSG(dwt_initialise(DWT_LOADUCODE) == DWT_SUCCESS);
+
     dwt_spi_set_rate_fast();
 
     dwt_configure(&config);
@@ -284,8 +280,7 @@ void uwb_rxok(const dwt_cb_data_t *data)
     uint16_t msg_length = data->datalength;
     uint8_t *buffer_rx = k_calloc(msg_length, sizeof(uint8_t));
 
-    if (buffer_rx == NULL)
-        return;
+    __ASSERT_NO_MSG(buffer_rx != NULL);
 
     // READ THE DATA AND ENABLE RX
     uint64_t rx_ts = get_rx_timestamp_u64();
@@ -300,8 +295,8 @@ void uwb_rxok(const dwt_cb_data_t *data)
 
     struct rx_queue_t *queue = k_calloc(1, sizeof(struct rx_queue_t));
 
-    if (queue == NULL)
-        return;
+    __ASSERT_NO_MSG(queue != NULL);
+
 
     queue->mac_data = mac_data;
     queue->buffer_rx = buffer_rx + mac_lenght;
