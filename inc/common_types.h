@@ -57,6 +57,7 @@ struct tx_queue_t
     uint16_t frame_length;
     uint8_t *frame_buffer;
     struct tx_details_t tx_details;
+    struct mac_data_t mac_data;
 };
 
 // DATA STRUCTURE DEFINITIONS

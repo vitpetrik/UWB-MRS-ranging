@@ -64,17 +64,11 @@ int rx_message(struct rx_queue_t *queue_data)
 void tx_message(const uint16_t destination_id, const frame_type_t frame_type, const int msg_type, const uint8_t *msg, int len, tx_details_t *tx_details)
 {
     // ALLOCATE MEMORY FOR tx BUFFER AND QUEUE DATA
-    uint8_t *buffer_tx = (uint8_t *)k_calloc(10 + 4 + len + 2, sizeof(uint8_t));
+    uint8_t *buffer_tx = (uint8_t *)k_calloc(ENCODED_MAC_LENGTH + len, sizeof(uint8_t));
     __ASSERT_NO_MSG(buffer_tx != NULL);
 
     struct tx_queue_t *queue_data = (struct tx_queue_t *)k_calloc(1, sizeof(struct tx_queue_t));
     __ASSERT_NO_MSG(queue_data != NULL);
-
-    if (buffer_tx == NULL || queue_data == NULL)
-    {
-        k_free(buffer_tx);
-        k_free(queue_data);
-    }
 
     struct mac_data_t mac_data = {
         .frame_ctrl = 0x9840 | frame_type,
@@ -86,18 +80,13 @@ void tx_message(const uint16_t destination_id, const frame_type_t frame_type, co
         .tx_delay = 0,
     };
 
-    int frame_length = encode_MAC(&mac_data, buffer_tx);
-
-    memcpy(buffer_tx + frame_length, msg, len);
-    frame_length += len;
-
-    //! reserve memory for CRC
-    frame_length += 2;
+    memcpy(&buffer_tx[ENCODED_MAC_LENGTH], msg, len);
 
     // INITIALIZE QUEUE DATA
     queue_data->frame_buffer = buffer_tx;
-    queue_data->frame_length = frame_length;
+    queue_data->frame_length = len;
     queue_data->tx_details = *tx_details;
+    queue_data->mac_data = mac_data;
 
     // SEND DATA TO TX QUEUE
     k_fifo_alloc_put(&tx_fifo, queue_data);
@@ -201,7 +190,7 @@ int rx_ranging_response(const uint16_t source_id, void *msg, struct rx_details_t
 
 float ToF_DS(float Ra, float Da, float Rb, float Db)
 {
-    float tof = (float)DWT_TIME_UNITS * (Ra * Rb - Da * Db) / (2 * (Ra + Db));
+    float tof = (float)DWT_TIME_UNITS * (Ra * Rb - Da * Db) / (Ra + Da + Rb + Db);
 
     return tof;
 }
@@ -221,7 +210,6 @@ int rx_ranging_ds(const uint16_t source_id, void *msg, struct rx_details_t *queu
     {
         struct device_t *dev_ptr = (struct device_t *)k_calloc(1, sizeof(struct device_t));
         __ASSERT_NO_MSG(dev_ptr != NULL);
-
 
         dev_ptr->id = source_id;
 
@@ -247,8 +235,6 @@ int rx_ranging_ds(const uint16_t source_id, void *msg, struct rx_details_t *queu
 
     struct device_t *device = (struct device_t *)devices_map[source_id];
 
-    device->ranging.last_meas_time = k_uptime_get_32();
-
     struct tx_details_t tx_details = {
         .ranging = 1,
         .tx_mode = DWT_START_TX_DELAYED | DWT_RESPONSE_EXPECTED,
@@ -270,22 +256,12 @@ int rx_ranging_ds(const uint16_t source_id, void *msg, struct rx_details_t *queu
     if (abs(dist) > 1000)
     {
         return 0;
-        // uint64_t tx_timestamp = devices_map[source_id]->ranging.tx_timestamp;
-        // printf("Tx %lu Rx %lu\n\r", devices_map[source_id]->ranging.tx_timestamp, queue_data->rx_timestamp);
-        // printf("%u %u %u %u\n\r", Ra, Da, Rb, Db);
-        // printf("source_id: 0x%X Time: %u ms ",source_id, k_uptime_get_32());
-        // printf("Dist %.2f\n\r", dist);
     }
 
+    device->ranging.last_meas_time = k_uptime_get_32();
     device->ranging.distance = dist;
     device->ranging.new_data = true;
     k_sem_give(&print_ranging_semaphore);
-
-    // printf("source_id: 0x%X Time: %u ms ",source_id, k_uptime_get_32());
-    // printf("Dist %.2f\n\r", dist);
-
-    // printf("%g, %f, %i, %lu, %u\n", device->ranging.distance, queue_data->rx_power, 0, 0, queue_data->tx_delay);
-    printf("%g\n", device->ranging.distance);
 
     return 0;
 }
@@ -358,8 +334,6 @@ void uwb_ranging_print_thread(void)
 {
     k_tid_t thread_id = k_current_get();
     printf("Ranging print thread started\n\r");
-
-    return;
 
     while (devices_map.empty())
         sleep_ms(100);

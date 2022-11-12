@@ -9,6 +9,8 @@ extern "C"
 {
 #endif
 
+#define ENCODED_MAC_LENGTH 14
+
 struct mac_data_t {
     uint16_t frame_ctrl;
     uint8_t seq_num;

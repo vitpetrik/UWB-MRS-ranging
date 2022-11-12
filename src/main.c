@@ -21,6 +21,8 @@
 #include "common_macro.h"
 #include "ranging.h"
 
+#include "mac.h"
+
 /* Example application name and version to display on LCD screen. */
 #define APP_NAME "MRS UWB v0.1"
 const char *buildString = "Build was compiled at " __DATE__ ", " __TIME__ ".";
@@ -162,31 +164,36 @@ K_CONDVAR_DEFINE(tx_condvar);
 
 void uwb_tx(struct tx_queue_t *tx_queue)
 {
+    struct mac_data_t *mac_data = (struct mac_data_t *) &(tx_queue->mac_data);
+    struct tx_details_t *tx_details = (struct tx_details_t *) &(tx_queue->tx_details);
+
     // SET DELAYED TX TIMESTAMP
     if (tx_queue->tx_details.tx_mode & DWT_START_TX_DELAYED)
     {
         uint64_t sys_time = get_sys_timestamp_u64();
-        uint64_t tx_timestamp = sys_time + (tx_queue->tx_details.tx_delay.reserved_time * UUS_TO_DWT_TIME);
+        uint64_t tx_timestamp = sys_time + (tx_details->tx_delay.reserved_time * UUS_TO_DWT_TIME);
 
         tx_timestamp &= 0xffffffffffffff00;
-        uint32_t delay = tx_timestamp - tx_queue->tx_details.tx_delay.rx_timestamp;
+        uint32_t delay = tx_timestamp - tx_details->tx_delay.rx_timestamp;
 
         tx_timestamp %= 0x000000ffffffffffU;
 
-        memcpy(&(tx_queue->frame_buffer[10]), &delay, sizeof(uint32_t));
         dwt_setdelayedtrxtime((uint32_t)(tx_timestamp >> 8));
+        mac_data->tx_delay = delay;
     }
 
+    int mac_length = encode_MAC(mac_data, tx_queue->frame_buffer);
+
     // WRITE DATA TO TX BUFFER
-    dwt_writetxdata(tx_queue->frame_length, tx_queue->frame_buffer, 0);
-    dwt_writetxfctrl(tx_queue->frame_length, 0, tx_queue->tx_details.ranging);
+    dwt_writetxdata(mac_length + tx_queue->frame_length + 2, tx_queue->frame_buffer, 0);
+    dwt_writetxfctrl(mac_length + tx_queue->frame_length + 2, 0, tx_details->ranging);
 
     // TURN OFF RECEIVER
     dwt_write8bitoffsetreg(SYS_CTRL_ID, SYS_CTRL_OFFSET, (uint8)SYS_CTRL_TRXOFF); // Disable the radio
     // START TRANSMITTING
-    if ((dwt_starttx(tx_queue->tx_details.tx_mode) == DWT_SUCCESS) && (k_condvar_wait(&tx_condvar, &dwt_mutex, K_MSEC(1)) == 0))
+    if ((dwt_starttx(tx_details->tx_mode) == DWT_SUCCESS) && (k_condvar_wait(&tx_condvar, &dwt_mutex, K_MSEC(1)) == 0))
     {
-        uint64_t *timestamp_ptr = tx_queue->tx_details.tx_timestamp;
+        uint64_t *timestamp_ptr = tx_details->tx_timestamp;
         if (timestamp_ptr != NULL)
         {
             uint64_t timestamp = get_tx_timestamp_u64();
