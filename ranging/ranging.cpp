@@ -1,33 +1,27 @@
 #include <zephyr/zephyr.h>
 #include <zephyr/sys/__assert.h>
+#include <unordered_map>
+#include <iostream>
 #include <string.h>
+#include <math.h>
 
 #include <pb_encode.h>
 #include <pb_decode.h>
 
-#include <iostream>
-#include <unordered_map>
-#include <vector>
-
-#include "ranging.h"
+#include "uwb_transport.h"
 #include "common_macro.h"
-
-#include <math.h>
+#include "ranging.h"
+#include "baca.h"
 #include "mac.h"
 
 #define INTEGRATOR_ALPHA 1
 #define DISTANCE_ALPHA 1
 
 extern uint16_t DEVICE_ID;
-extern uint16_t PAN_ID;
-
-extern uint8_t SEQ_NUM;
-
-extern struct k_fifo tx_fifo;
-extern struct k_fifo rx_fifo;
 
 typedef std::unordered_map<uint32_t, struct device_t *> devices_map_t;
 typedef std::unordered_map<uint16_t, uint64_t *> tx_timestamps_map_t;
+
 tx_timestamps_map_t tx_timestamps_map;
 devices_map_t devices_map;
 
@@ -59,37 +53,6 @@ int rx_message(struct rx_queue_t *queue_data)
         break;
     }
     return status;
-}
-
-void tx_message(const uint16_t destination_id, const frame_type_t frame_type, const int msg_type, const uint8_t *msg, int len, tx_details_t *tx_details)
-{
-    // ALLOCATE MEMORY FOR tx BUFFER AND QUEUE DATA
-    uint8_t *buffer_tx = (uint8_t *)k_calloc(ENCODED_MAC_LENGTH + len, sizeof(uint8_t));
-    __ASSERT_NO_MSG(buffer_tx != NULL);
-
-    struct tx_queue_t *queue_data = (struct tx_queue_t *)k_calloc(1, sizeof(struct tx_queue_t));
-    __ASSERT_NO_MSG(queue_data != NULL);
-
-    struct mac_data_t mac_data = {
-        .frame_ctrl = 0x9840 | frame_type,
-        .seq_num = SEQ_NUM++,
-        .pan_id = PAN_ID,
-        .destination_id = destination_id,
-        .source_id = DEVICE_ID,
-        .msg_type = msg_type,
-        .tx_delay = 0,
-    };
-
-    memcpy(&buffer_tx[ENCODED_MAC_LENGTH], msg, len);
-
-    // INITIALIZE QUEUE DATA
-    queue_data->frame_buffer = buffer_tx;
-    queue_data->frame_length = len;
-    queue_data->tx_details = *tx_details;
-    queue_data->mac_data = mac_data;
-
-    // SEND DATA TO TX QUEUE
-    k_fifo_alloc_put(&tx_fifo, queue_data);
 }
 
 // PROCESS BEACON TYPE MESSAGE
@@ -262,6 +225,8 @@ int rx_ranging_ds(const uint16_t source_id, void *msg, struct rx_details_t *queu
     device->ranging.distance = dist;
     device->ranging.new_data = true;
     k_sem_give(&print_ranging_semaphore);
+
+    // write_baca(&dist, sizeof(float));
 
     return 0;
 }

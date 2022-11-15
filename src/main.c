@@ -1,7 +1,12 @@
-/*
- * Copyright (c) 2012-2014 Wind River Systems, Inc.
- *
- * SPDX-License-Identifier: Apache-2.0
+/**
+ * @file main.c
+ * @author Vit Petrik (petrivi2@fel.cvut.cz)
+ * @brief Main entry point to UWB positioning sytem
+ * @version 0.1
+ * @date 2022-11-15
+ * 
+ * @copyright Copyright (c) 2022
+ * 
  */
 
 #include <zephyr/zephyr.h>
@@ -14,6 +19,8 @@
 #include <timing/timing.h>
 #include <string.h>
 
+#include <stdio.h>
+
 #include "deca_regs.h"
 #include "platform.h"
 
@@ -22,6 +29,7 @@
 #include "ranging.h"
 
 #include "mac.h"
+#include "baca.h"
 
 /* Example application name and version to display on LCD screen. */
 #define APP_NAME "MRS UWB v0.1"
@@ -99,39 +107,49 @@ void main(void)
 
     printf("Device ID: 0x%X\n\r", DEVICE_ID);
 
+    // Initiliaze LEDs GPIO
     gpio_pin_configure_dt(&led0red, GPIO_OUTPUT_INACTIVE);
     gpio_pin_configure_dt(&led1green, GPIO_OUTPUT_INACTIVE);
     gpio_pin_configure_dt(&led2red, GPIO_OUTPUT_INACTIVE);
     gpio_pin_configure_dt(&led3blue, GPIO_OUTPUT_INACTIVE);
 
-    // SETUP DW1000
+    // Get DWT Mutex
     k_mutex_init(&dwt_mutex);
     k_mutex_lock(&dwt_mutex, K_FOREVER);
 
+    // Reset DWT to delete previous config
     dwt_hardreset();
     dwt_hardinterrupt(dwm_int_callback);
 
+    // The SPI need to be set to lower speed setting
     dwt_spi_set_rate_slow();
 
     __ASSERT_NO_MSG(dwt_initialise(DWT_LOADUCODE) == DWT_SUCCESS);
 
+    // Now, we can enable full speed on SPI bus
     dwt_spi_set_rate_fast();
 
+    // Set our configuration
     dwt_configure(&config);
 
+    // Set transimtting power
+    //! Need later revision
     dwt_txconfig_t txconfig = {.PGdly = 0xC0, .power = 0x25466788};
-
     dwt_configuretxrf(&txconfig);
     dwt_setsmarttxpower(true);
 
     dwt_setleds(DWT_LEDS_ENABLE);
 
+    //? Might need to be changed from ROS
     dwt_setaddress16(DEVICE_ID);
     dwt_setpanid(PAN_ID);
 
+    // Enable frame filtering and rejection
     dwt_enableframefilter(DWT_FF_DATA_EN, true);
     dwt_setdblrxbuffmode(1);
 
+    //? Experimentaly set antenna delays
+    //? Not that much accurate
     dwt_settxantennadelay(21875);
     dwt_setrxantennadelay(21875);
 
@@ -151,6 +169,8 @@ void main(void)
     k_thread_resume(uwb_beacon_thr);
     k_thread_resume(uwb_ranging_thr);
 
+    //? Heart beat LED
+    //? Good to recognize bad things happening.. SEG FAULT etc.
     while (1)
     {
         gpio_pin_toggle_dt(&led1green);
@@ -160,28 +180,40 @@ void main(void)
     return;
 }
 
+// Condvar for waiting for the interrupt
 K_CONDVAR_DEFINE(tx_condvar);
 
+/**
+ * @brief Transmit data from the queue
+ * 
+ * @param tx_queue pointer to queue data
+ */
 void uwb_tx(struct tx_queue_t *tx_queue)
 {
+    // Get MAC data and Transmit details
     struct mac_data_t *mac_data = (struct mac_data_t *) &(tx_queue->mac_data);
     struct tx_details_t *tx_details = (struct tx_details_t *) &(tx_queue->tx_details);
 
     // SET DELAYED TX TIMESTAMP
     if (tx_queue->tx_details.tx_mode & DWT_START_TX_DELAYED)
     {
+        // calculate Tx timestamp accoring to tx_details data
         uint64_t sys_time = get_sys_timestamp_u64();
         uint64_t tx_timestamp = sys_time + (tx_details->tx_delay.reserved_time * UUS_TO_DWT_TIME);
 
+        // Actual data sent to UWB doesnt have lowest 8 bits 
         tx_timestamp &= 0xffffffffffffff00;
         uint32_t delay = tx_timestamp - tx_details->tx_delay.rx_timestamp;
 
+        // handle overflow
         tx_timestamp %= 0x000000ffffffffffU;
 
+        // set the final tx data to the UWB and to MAC data
         dwt_setdelayedtrxtime((uint32_t)(tx_timestamp >> 8));
         mac_data->tx_delay = delay;
     }
 
+    // Serialize MAC
     int mac_length = encode_MAC(mac_data, tx_queue->frame_buffer);
 
     // WRITE DATA TO TX BUFFER
@@ -193,6 +225,7 @@ void uwb_tx(struct tx_queue_t *tx_queue)
     // START TRANSMITTING
     if ((dwt_starttx(tx_details->tx_mode) == DWT_SUCCESS) && (k_condvar_wait(&tx_condvar, &dwt_mutex, K_MSEC(1)) == 0))
     {
+        // Save Tx timestamp if needed
         uint64_t *timestamp_ptr = tx_details->tx_timestamp;
         if (timestamp_ptr != NULL)
         {
@@ -208,12 +241,16 @@ void uwb_tx(struct tx_queue_t *tx_queue)
     }
 }
 
-// RECIEVE THREAD
+/**
+ * @brief Receiving thread, waits foe queue
+ *
+ */
 void uwb_rx_thread(void)
 {
     k_tid_t thread_id = k_current_get();
     k_thread_suspend(thread_id);
 
+    // Enable RX
     k_mutex_lock(&dwt_mutex, K_FOREVER);
     dwt_rxenable(DWT_START_RX_IMMEDIATE);
     k_mutex_unlock(&dwt_mutex);
@@ -222,8 +259,10 @@ void uwb_rx_thread(void)
 
     while (1)
     {
+        // wait for data
         struct rx_queue_t *data = (struct rx_queue_t *)k_fifo_get(&rx_fifo, K_FOREVER);
 
+        // Send the data to higher layer
         rx_message(data);
 
         // FREE QUEUE DATA
@@ -232,7 +271,10 @@ void uwb_rx_thread(void)
     }
 }
 
-// TRANSMIT THREAD
+/**
+ * @brief Transmitting thread, waits for queue
+ * 
+ */
 void uwb_tx_thread(void)
 {
     k_tid_t thread_id = k_current_get();
@@ -246,6 +288,7 @@ void uwb_tx_thread(void)
         // GET DATA FOR TRANSMITTING THROUGH QUEUE
         struct tx_queue_t *tx_queue = (struct tx_queue_t *)k_fifo_get(&tx_fifo, K_FOREVER);
 
+        // Get the mutex and send the data to lower layer
         k_mutex_lock(&dwt_mutex, K_FOREVER);
 
         uwb_tx(tx_queue);

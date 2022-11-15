@@ -11,6 +11,7 @@ include_directories(decadriver platform protocol inc ranging baca)
 
 target_sources(app PRIVATE 
     src/main.c
+    src/uwb_transport.c
     platform/deca_spi.c
     platform/deca_mutex.c
     platform/deca_sleep.c
@@ -21,6 +22,7 @@ target_sources(app PRIVATE
     ranging/ranging.cpp
     protocol/mac.c
     baca/baca.c
+
 )
 
 set_property(TARGET app PROPERTY CXX_STANDARD 20)
