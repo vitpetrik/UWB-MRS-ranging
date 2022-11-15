@@ -11,6 +11,7 @@ include_directories(decadriver platform protocol inc ranging baca)
 
 target_sources(app PRIVATE 
     src/main.c
+    src/uwb_threads.c
     src/uwb_transport.c
     platform/deca_spi.c
     platform/deca_mutex.c
