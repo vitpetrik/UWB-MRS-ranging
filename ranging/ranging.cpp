@@ -26,6 +26,28 @@ devices_map_t devices_map;
 
 K_SEM_DEFINE(print_ranging_semaphore, 0, 1);
 
+/**
+ * @brief Receiving thread, waits for queue
+ *
+ */
+void ranging_thread(void)
+{
+    printf("Rx thread started\n\r");
+
+    while (1)
+    {
+        // wait for data
+        struct rx_queue_t *data = read_uwb();
+
+        // Send the data to higher layer
+        rx_message(data);
+
+        // FREE QUEUE DATA
+        k_free(data->buffer_rx_free_ptr);
+        k_free(data);
+    }
+}
+
 int rx_message(struct rx_queue_t *queue_data)
 {
     int source_id = queue_data->mac_data.source_id;
@@ -89,8 +111,8 @@ int rx_ranging_init(const uint16_t source_id, void *msg, struct rx_details_t *rx
         .tx_timestamp = NULL,
         .tx_delay = {.rx_timestamp = rx_details->rx_timestamp, .reserved_time = 500}};
 
-    // tx_message(source_id, DATA, RANGING_RESPONSE_MSG, (const uint8_t *)&(rx_details->carrier_integrator), sizeof(int32_t), &tx_details);
-    tx_message(source_id, DATA, RANGING_RESPONSE_MSG, (const uint8_t *)NULL, 0, &tx_details);
+    // write_uwb(source_id, DATA, RANGING_RESPONSE_MSG, (const uint8_t *)&(rx_details->carrier_integrator), sizeof(int32_t), &tx_details);
+    write_uwb(source_id, DATA, RANGING_RESPONSE_MSG, (const uint8_t *)NULL, 0, &tx_details);
 
     return 0;
 }
@@ -207,7 +229,7 @@ int rx_ranging_ds(const uint16_t source_id, void *msg, struct rx_details_t *queu
     memcpy(&(buffer_tx[1]), &Rb, sizeof(uint32_t));
     memcpy(&(buffer_tx[2]), &Db, sizeof(uint32_t));
 
-    tx_message(source_id, DATA, RANGING_DS_MSG, (const uint8_t *)buffer_tx, 3 * sizeof(uint32_t), &tx_details);
+    write_uwb(source_id, DATA, RANGING_DS_MSG, (const uint8_t *)buffer_tx, 3 * sizeof(uint32_t), &tx_details);
 
     if (Ra == 0 || Da == 0 || Rb == 0 || Db == 0)
         return 0;
@@ -233,10 +255,6 @@ int rx_ranging_ds(const uint16_t source_id, void *msg, struct rx_details_t *queu
 // BEACON THREAD
 void uwb_beacon_thread(void)
 {
-    // SUSPEND THREAD FOR NOW
-    k_tid_t thread_id = k_current_get();
-    k_thread_suspend(thread_id);
-
     printf("Starting beacon thread\n\r");
 
     // INIT MESSAGE
@@ -256,7 +274,7 @@ void uwb_beacon_thread(void)
         pb_ostream_t stream = pb_ostream_from_buffer(buffer_tx, beacon_msg_size);
         pb_encode(&stream, beacon_msg_fields, &beacon);
 
-        tx_message(0xffff, DATA, BEACON_MSG, (const uint8_t *)buffer_tx, stream.bytes_written, &tx_details);
+        write_uwb(0xffff, DATA, BEACON_MSG, (const uint8_t *)buffer_tx, stream.bytes_written, &tx_details);
 
         sleep_ms(1000);
     }
@@ -287,7 +305,7 @@ void uwb_ranging_thread(void)
                 .tx_mode = DWT_START_TX_IMMEDIATE | DWT_RESPONSE_EXPECTED,
                 .tx_timestamp = &(device->ranging.tx_timestamp)};
 
-            tx_message(device_id, DATA, RANGING_DS_MSG, (uint8_t *)empty, 3 * sizeof(uint32_t), &tx_details);
+            write_uwb(device_id, DATA, RANGING_DS_MSG, (uint8_t *)empty, 3 * sizeof(uint32_t), &tx_details);
         }
         sleep_ms(10);
     }
@@ -296,7 +314,6 @@ void uwb_ranging_thread(void)
 // RANGING THREAD
 void uwb_ranging_print_thread(void)
 {
-    k_tid_t thread_id = k_current_get();
     printf("Ranging print thread started\n\r");
 
     while (devices_map.empty())

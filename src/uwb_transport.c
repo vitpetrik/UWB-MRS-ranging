@@ -22,7 +22,7 @@
  * @param len length of the message data
  * @param tx_details details of the transission e.g timestamp...
  */
-void tx_message(const uint16_t destination_id, const frame_type_t frame_type, const int msg_type, const uint8_t *msg, int len, struct tx_details_t *tx_details)
+void write_uwb(const uint16_t destination_id, const frame_type_t frame_type, const int msg_type, const uint8_t *msg, int len, struct tx_details_t *tx_details)
 {
     // ALLOCATE MEMORY FOR tx BUFFER AND QUEUE DATA
     uint8_t *buffer_tx = (uint8_t *)k_calloc(ENCODED_MAC_LENGTH + len, sizeof(uint8_t));
@@ -50,5 +50,13 @@ void tx_message(const uint16_t destination_id, const frame_type_t frame_type, co
     queue_data->mac_data = mac_data;
 
     // SEND DATA TO TX QUEUE
-    k_fifo_alloc_put(&tx_fifo, queue_data);
+    k_fifo_alloc_put(&uwb_tx_fifo, queue_data);
+}
+
+
+struct rx_queue_t* read_uwb()
+{
+    struct rx_queue_t *data = (struct rx_queue_t *)k_fifo_get(&uwb_rx_fifo, K_FOREVER);
+
+    return data;
 }

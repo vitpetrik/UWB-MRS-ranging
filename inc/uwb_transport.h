@@ -33,7 +33,14 @@ extern "C"
  * @param len length of the message data
  * @param tx_details details of the transission e.g timestamp...
  */
-void tx_message(const uint16_t destination_id, const frame_type_t frame_type, const int msg_type, const uint8_t *msg, int len, struct tx_details_t *tx_details);
+void write_uwb(const uint16_t destination_id, const frame_type_t frame_type, const int msg_type, const uint8_t *msg, int len, struct tx_details_t *tx_details);
+
+/**
+ * @brief Waits for data from UWB
+ *
+ * @return struct rx_queue_t* pointer to received data
+ */
+struct rx_queue_t* read_uwb();
 
 #ifdef __cplusplus
 }

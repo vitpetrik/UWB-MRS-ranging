@@ -28,7 +28,7 @@ extern "C"
  * @param data_length length of the data in uint8_t size
  * @return uint8_t returns checksum of sent data
  */
-uint8_t write_buf(void* data, int data_length);
+uint8_t calc_cksum(uint8_t *data, int data_length);
 
 /**
  * @brief Write buffer accoring to BACA protocol
@@ -36,16 +36,16 @@ uint8_t write_buf(void* data, int data_length);
  * @param data pointer to data
  * @param data_length length of the data in uint8_t size
  */
-void write_baca(void* data, int data_length);
+void write_baca(uint8_t *data, int data_length);
 
 /**
  * @brief Read data into buffer
  * 
- * @param buffer pointer to receiver buffer
+ * @param buffer pointer to received payload
  * @param buflen length of the buffer
  * @return int length of received data
  */
-int read_baca(void *buffer, int buflen);
+int read_baca(uint8_t *buffer, int buflen);
 
 #ifdef __cplusplus
 }

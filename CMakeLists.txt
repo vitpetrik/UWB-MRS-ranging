@@ -13,6 +13,7 @@ target_sources(app PRIVATE
     src/main.c
     src/uwb_threads.c
     src/uwb_transport.c
+    src/uart.c
     platform/deca_spi.c
     platform/deca_mutex.c
     platform/deca_sleep.c

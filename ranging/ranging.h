@@ -40,6 +40,12 @@ extern "C"
 {
 #endif
 
+    /**
+     * @brief Receiving thread, waits for queue
+     *
+     */
+    void ranging_thread(void);
+
     // THREADS
     void uwb_beacon_thread(void);
     void uwb_ranging_thread(void);

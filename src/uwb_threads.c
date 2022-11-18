@@ -25,6 +25,13 @@
 
 #include "mac.h"
 
+// GLOBAL VARIABLES
+struct k_mutex dwt_mutex;
+
+// QUEUES
+K_FIFO_DEFINE(uwb_tx_fifo);
+K_FIFO_DEFINE(uwb_rx_fifo);
+
 // Condvar for waiting for the interrupt
 K_CONDVAR_DEFINE(tx_condvar);
 
@@ -94,16 +101,13 @@ void uwb_tx(struct tx_queue_t *tx_queue)
  */
 void uwb_tx_thread(void)
 {
-    k_tid_t thread_id = k_current_get();
-    k_thread_suspend(thread_id);
-
     printf("Tx thread started\n\r");
     k_condvar_init(&tx_condvar);
 
     while (1)
     {
         // GET DATA FOR TRANSMITTING THROUGH QUEUE
-        struct tx_queue_t *tx_queue = (struct tx_queue_t *)k_fifo_get(&tx_fifo, K_FOREVER);
+        struct tx_queue_t *tx_queue = (struct tx_queue_t *)k_fifo_get(&uwb_tx_fifo, K_FOREVER);
 
         // Get the mutex and send the data to lower layer
         k_mutex_lock(&dwt_mutex, K_FOREVER);
@@ -114,36 +118,6 @@ void uwb_tx_thread(void)
         k_mutex_unlock(&dwt_mutex);
         k_free(tx_queue->frame_buffer);
         k_free(tx_queue);
-    }
-}
-
-/**
- * @brief Receiving thread, waits foe queue
- *
- */
-void uwb_rx_thread(void)
-{
-    k_tid_t thread_id = k_current_get();
-    k_thread_suspend(thread_id);
-
-    // Enable RX
-    k_mutex_lock(&dwt_mutex, K_FOREVER);
-    dwt_rxenable(DWT_START_RX_IMMEDIATE);
-    k_mutex_unlock(&dwt_mutex);
-
-    printf("Rx thread started\n\r");
-
-    while (1)
-    {
-        // wait for data
-        struct rx_queue_t *data = (struct rx_queue_t *)k_fifo_get(&rx_fifo, K_FOREVER);
-
-        // Send the data to higher layer
-        rx_message(data);
-
-        // FREE QUEUE DATA
-        k_free(data->buffer_rx_free_ptr);
-        k_free(data);
     }
 }
 
@@ -240,7 +214,7 @@ void uwb_rxok(const dwt_cb_data_t *data)
     queue->buffer_rx_free_ptr = buffer_rx;
     queue->rx_details = rx_details;
 
-    k_fifo_alloc_put(&rx_fifo, queue);
+    k_fifo_alloc_put(&uwb_rx_fifo, queue);
 
     return;
 }

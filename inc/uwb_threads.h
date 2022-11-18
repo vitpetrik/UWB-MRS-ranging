@@ -19,12 +19,6 @@
 void uwb_tx_thread(void);
 
 /**
- * @brief Receiving thread, waits foe queue
- *
- */
-void uwb_rx_thread(void);
-
-/**
  * @brief Thread that handles dwt interrupts, gets woken up by interrupt
  * 
  */

@@ -19,10 +19,7 @@
 #include <string.h>
 #include "baca.h"
 
-/* change this to any other UART peripheral if desired */
-#define UART_DEVICE_NODE DT_NODELABEL(uart0)
-
-struct device *uart_dev = DEVICE_DT_GET(UART_DEVICE_NODE);
+#include "uart.h"
 
 /**
  * @brief Write buffer to COM port
@@ -31,14 +28,12 @@ struct device *uart_dev = DEVICE_DT_GET(UART_DEVICE_NODE);
  * @param data_length length of the data in uint8_t size
  * @return uint8_t returns checksum of sent data
  */
-uint8_t write_buf(void* data, int data_length)
+uint8_t calc_cksum(uint8_t* data, int data_length)
 {
-    unsigned char *data_char = (unsigned char *) data;
     uint8_t checksum = 0;
 
     for (int i = 0; i < data_length; i++) {
-		uart_poll_out(uart_dev, data_char[i]);
-        checksum += data_char[i];
+        checksum += data[i];
 	}
 
     return checksum;
@@ -50,26 +45,27 @@ uint8_t write_buf(void* data, int data_length)
  * @param data pointer to data
  * @param data_length length of the data in uint8_t size
  */
-void write_baca(void* data, int data_length)
+void write_baca(uint8_t* data, int data_length)
 {
     // write protocol header
     uint8_t checksum = 'b';
-    uart_poll_out(uart_dev, 'b');
+    write_char('b');
 
     // write payload size
     uint8_t payload_size = 1 + data_length;
-    uart_poll_out(uart_dev, payload_size);
+    write_char(payload_size);
     checksum += payload_size;
 
     // write message id
-    uart_poll_out(uart_dev, MESSAGE_ID);
+    write_char(MESSAGE_ID);
     checksum += MESSAGE_ID;
 
     // write the actual data
-    checksum += write_buf(data, data_length);
+    write_buffer(data, data_length);
+    checksum += calc_cksum(data, data_length);
 
     // send checksum
-    uart_poll_out(uart_dev, checksum);
+    write_char(checksum);
 
     return;
 }
@@ -77,40 +73,34 @@ void write_baca(void* data, int data_length)
 /**
  * @brief Read data into buffer
  * 
- * @param buffer pointer to receiver buffer
+ * @param buffer pointer to received payload
  * @param buflen length of the buffer
  * @return int length of received data
  */
-int read_baca(void *buffer, int buflen)
+int read_baca(uint8_t *buffer, int buflen)
 {
-  //   if (Serial.available() > 2) {
-  //   uint8_t checksum = 0;
-  //   uint8_t tmp_in;
-  //   uint8_t id;
+    uint8_t cksum = 0;
 
-  //   tmp_in = Serial.read();
+    uint8_t c = read_char();
+    cksum += c;
 
-  //   //start of message
-  //   if (tmp_in == 'b') {
-  //     checksum += tmp_in;
-  //     tmp_in = Serial.read();
+    if(c != 'b')
+        return -1;
 
-  //     // payload
-  //     if (tmp_in == 1) {
-  //       checksum += tmp_in;
+    uint8_t payload_length = read_char();
+    cksum += payload_length;
 
-  //       // id
-  //       id = Serial.read();
-  //       checksum += id;
+    if (buflen < payload_length)
+        return -1;
 
+    read_buffer(buffer, payload_length);
 
-  //       // checksum
-  //       if (checksum == Serial.read()) {
-  //         return id;
-  //       }
-  //     }
-  //   }
-  //   // bad checksum
-  //   return 255;
-  // }
+    cksum += calc_cksum(buffer, payload_length);
+
+    uint8_t rx_cksum = read_char();
+
+    if (rx_cksum != cksum)
+        return -1;
+
+    return payload_length;
 }
