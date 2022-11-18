@@ -38,7 +38,14 @@ uint8_t write_buf(void* data, int data_length);
  */
 void write_baca(void* data, int data_length);
 
-// TODO: receiver
+/**
+ * @brief Read data into buffer
+ * 
+ * @param buffer pointer to receiver buffer
+ * @param buflen length of the buffer
+ * @return int length of received data
+ */
+int read_baca(void *buffer, int buflen);
 
 #ifdef __cplusplus
 }

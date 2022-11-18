@@ -10,11 +10,7 @@
  */
 
 #include "uwb_transport.h"
-
-extern uint16_t DEVICE_ID;
-extern uint16_t PAN_ID;
-extern uint8_t SEQ_NUM;
-extern struct k_fifo tx_fifo;
+#include "common_variables.h"
 
 /**
  * @brief Transport data to tx queue

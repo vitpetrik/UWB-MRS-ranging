@@ -10,14 +10,13 @@
 
 #include "uwb_transport.h"
 #include "common_macro.h"
+#include "common_variables.h"
 #include "ranging.h"
 #include "baca.h"
 #include "mac.h"
 
 #define INTEGRATOR_ALPHA 1
 #define DISTANCE_ALPHA 1
-
-extern uint16_t DEVICE_ID;
 
 typedef std::unordered_map<uint32_t, struct device_t *> devices_map_t;
 typedef std::unordered_map<uint16_t, uint64_t *> tx_timestamps_map_t;

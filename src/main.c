@@ -26,6 +26,7 @@
 
 #include "common_types.h"
 #include "common_macro.h"
+#include "common_variables.h"
 #include "uwb_threads.h"
 #include "ranging.h"
 

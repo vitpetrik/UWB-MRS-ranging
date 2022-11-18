@@ -13,21 +13,17 @@
 #include <zephyr/zephyr.h>
 #include <zephyr/sys/__assert.h>
 
+#include <stdio.h>
+
 #include "deca_regs.h"
 #include "platform.h"
 
 #include "common_types.h"
 #include "common_macro.h"
+#include "common_variables.h"
 #include "ranging.h"
 
 #include "mac.h"
-
-
-// Get global variables
-extern struct k_fifo tx_fifo;
-extern struct k_fifo rx_fifo;
-
-extern struct k_mutex dwt_mutex;
 
 // Condvar for waiting for the interrupt
 K_CONDVAR_DEFINE(tx_condvar);

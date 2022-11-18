@@ -14,8 +14,9 @@
 #include <zephyr/device.h>
 #include <zephyr/drivers/uart.h>
 
-#include <string.h>
+#include "common_variables.h"
 
+#include <string.h>
 #include "baca.h"
 
 /* change this to any other UART peripheral if desired */
@@ -73,3 +74,43 @@ void write_baca(void* data, int data_length)
     return;
 }
 
+/**
+ * @brief Read data into buffer
+ * 
+ * @param buffer pointer to receiver buffer
+ * @param buflen length of the buffer
+ * @return int length of received data
+ */
+int read_baca(void *buffer, int buflen)
+{
+  //   if (Serial.available() > 2) {
+  //   uint8_t checksum = 0;
+  //   uint8_t tmp_in;
+  //   uint8_t id;
+
+  //   tmp_in = Serial.read();
+
+  //   //start of message
+  //   if (tmp_in == 'b') {
+  //     checksum += tmp_in;
+  //     tmp_in = Serial.read();
+
+  //     // payload
+  //     if (tmp_in == 1) {
+  //       checksum += tmp_in;
+
+  //       // id
+  //       id = Serial.read();
+  //       checksum += id;
+
+
+  //       // checksum
+  //       if (checksum == Serial.read()) {
+  //         return id;
+  //       }
+  //     }
+  //   }
+  //   // bad checksum
+  //   return 255;
+  // }
+}
