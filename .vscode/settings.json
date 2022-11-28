@@ -17,7 +17,8 @@
         "string_view": "cpp",
         "ranges": "cpp",
         "math.h": "c",
-        "common_variables.h": "c"
+        "common_variables.h": "c",
+        "uart.h": "c"
     },
     "cortex-debug.variableUseNaturalFormat": false
 }

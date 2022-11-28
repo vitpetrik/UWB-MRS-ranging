@@ -14,6 +14,7 @@
 #include <zephyr/device.h>
 #include <zephyr/devicetree.h>
 #include <zephyr/drivers/sensor.h>
+#include <zephyr/drivers/uart.h>
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/drivers/spi.h>
 #include <timing/timing.h>
@@ -31,7 +32,7 @@
 #include "ranging.h"
 
 #include "mac.h"
-#include "baca.h"
+#include "uart.h"
 
 /* Example application name and version to display on LCD screen. */
 #define APP_NAME "MRS UWB v0.1"
@@ -40,6 +41,12 @@ const char *buildString = "Build was compiled at " __DATE__ ", " __TIME__ ".";
 uint16_t DEVICE_ID;
 uint16_t PAN_ID;
 uint8_t SEQ_NUM;
+
+
+// UART
+
+#define UART_DEVICE_NODE DT_NODELABEL(uart0)
+struct device *uart_dev = DEVICE_DT_GET(UART_DEVICE_NODE);
 
 // LEDS
 
@@ -62,30 +69,35 @@ static dwt_config_t config = {
     (128 + 8 + 1)    /* SFD timeout (preamble length + 1 + SFD length - PAC size). Used in RX only. */
 };
 
-// GLOBAL VARIABLES
-struct k_mutex dwt_mutex;
+// Threads declarations
 
-// QUEUES
-K_FIFO_DEFINE(tx_fifo);
-K_FIFO_DEFINE(rx_fifo);
+/**
+ * @brief Receive and process data from ROS (or PC)
+ * 
+ */
+void ros_rx_thread(void);
 
-// THREADS
+// Threads definitions
+
+K_THREAD_DEFINE(ros_rx_thr, 1024, ros_rx_thread, NULL, NULL, NULL, 5, 0, 0);
+
 K_THREAD_DEFINE(uwb_beacon_thr, 1024, uwb_beacon_thread, NULL, NULL, NULL, 5, 0, 0);
 K_THREAD_DEFINE(uwb_ranging_thr, 1024, uwb_ranging_thread, NULL, NULL, NULL, 5, 0, 0);
 
 K_THREAD_DEFINE(uwb_ranging_print_thr, 1024, uwb_ranging_print_thread, NULL, NULL, NULL, 7, 0, 0);
 
-K_THREAD_DEFINE(uwb_rx_thr, 1024, uwb_rx_thread, NULL, NULL, NULL, 3, 0, 0);
+K_THREAD_DEFINE(ranging_thr, 1024, ranging_thread, NULL, NULL, NULL, 3, 0, 0);
 K_THREAD_DEFINE(uwb_tx_thr, 1024, uwb_tx_thread, NULL, NULL, NULL, -2, 0, 0);
 
 K_THREAD_DEFINE(dwt_isr_thr, 1024, dwt_isr_thread, NULL, NULL, NULL, -1, 0, 0);
-
 
 void main(void)
 {
     // INITIALIZE
     printf("%s\n\r", APP_NAME);
     printf("%s\n\r", buildString);
+
+    uart_setup();
 
     DEVICE_ID = NRF_FICR->DEVICEID[0] >> 16;
     PAN_ID = 0xdeca;
@@ -141,27 +153,55 @@ void main(void)
 
     dwt_setcallbacks(uwb_txdone, uwb_rxok, uwb_rxto, uwb_rxerr, uwb_rxfrej);
 
-    // dwt_setinterrupt(DWT_INT_TFRS | DWT_INT_RFCG | DWT_INT_ARFE, 1);
     dwt_setinterrupt(DWT_INT_TFRS | DWT_INT_RFCG, 1);
     dwt_enable_interrupt();
+
+    dwt_rxenable(DWT_START_RX_IMMEDIATE);
 
     k_mutex_unlock(&dwt_mutex);
 
     printf("Settings done!\n\r");
 
-    // START THE THREADS
-    k_thread_resume(uwb_tx_thr);
-    k_thread_resume(uwb_rx_thr);
-    k_thread_resume(uwb_beacon_thr);
-    k_thread_resume(uwb_ranging_thr);
-
     //? Heart beat LED
     //? Good to recognize bad things happening.. SEG FAULT etc.
+
+
+    uint8_t hello_world[] = {'H', 'e', 'l', 'l', 'o', ' ', 'w', 'o', 'r', 'l', 'd', '!', '\0'};
+    struct baca_protocol msg;
+
+    msg.payload_size = sizeof(hello_world);
+    memcpy(msg.payload, hello_world, sizeof(hello_world));
+
     while (1)
     {
-        gpio_pin_toggle_dt(&led1green);
+        // write_baca(&msg);
+        gpio_pin_set_dt(&led1green, 1);
         sleep_ms(200);
+        gpio_pin_set_dt(&led1green, 0);
+        sleep_ms(200);
+        gpio_pin_set_dt(&led1green, 1);
+        sleep_ms(200);
+        gpio_pin_set_dt(&led1green, 0);
+        sleep_ms(600);
     }
 
     return;
+}
+
+
+/**
+ * @brief Receive and process data from ROS
+ * 
+ */
+void ros_rx_thread(void)
+{
+    return;
+    struct baca_protocol msg;
+
+    while(1)
+    {
+        int payload_length = read_baca(&msg);
+
+        printf("Something just got received\n\r");
+    }
 }

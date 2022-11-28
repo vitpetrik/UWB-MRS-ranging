@@ -12,8 +12,9 @@
 #include "common_macro.h"
 #include "common_variables.h"
 #include "ranging.h"
-#include "baca.h"
+
 #include "mac.h"
+#include "uart.h"
 
 #define INTEGRATOR_ALPHA 1
 #define DISTANCE_ALPHA 1
@@ -247,7 +248,14 @@ int rx_ranging_ds(const uint16_t source_id, void *msg, struct rx_details_t *queu
     device->ranging.new_data = true;
     k_sem_give(&print_ranging_semaphore);
 
-    // write_baca(&dist, sizeof(float));
+
+    struct baca_protocol ros;
+
+    sprintf((char*) ros.payload, "dist %.2f", dist);
+
+    ros.payload_size = strlen((char*) ros.payload);
+
+    write_baca(&ros);
 
     return 0;
 }
@@ -310,11 +318,13 @@ void uwb_ranging_thread(void)
         sleep_ms(10);
     }
 }
-
+ww
 // RANGING THREAD
 void uwb_ranging_print_thread(void)
 {
     printf("Ranging print thread started\n\r");
+
+    return;
 
     while (devices_map.empty())
         sleep_ms(100);
