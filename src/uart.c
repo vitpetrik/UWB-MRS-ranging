@@ -25,6 +25,9 @@ struct k_mutex uart_tx_mutex;
 K_SEM_DEFINE(rx_semaphore, 0, 1);
 K_SEM_DEFINE(tx_semaphore, 1, 1);
 
+uint8_t rx_buffer[1024];
+uint8_t tx_buffer[1024];
+
 
 /**
  * @brief Setup UART peripherial
@@ -32,9 +35,10 @@ K_SEM_DEFINE(tx_semaphore, 1, 1);
  */
 void uart_setup()
 {
-    uart_callback_set(uart_dev, uart_callback, NULL);
-    k_mutex_init(&uart_rx_mutex);
-    k_mutex_init(&uart_tx_mutex);
+    tty_init(&tty, uart_dev);
+
+    tty_set_rx_buf(&tty, (void*) rx_buffer, sizeof(rx_buffer));
+    tty_set_tx_buf(&tty, (void*) tx_buffer, sizeof(tx_buffer));
 
     return;
 }
@@ -66,20 +70,16 @@ uint8_t calc_cksum(uint8_t* data, int data_length)
 void write_baca(struct baca_protocol *msg)
 {
     // write protocol header
-    msg->cksum = 'b';
-    write_char('b');
 
-    // write payload size
-    write_char(msg->payload_size);
-    msg->cksum += msg->payload_size;
+    uint8_t out_buffer[256];
 
-    // write the actual data
-    write_buffer(msg->payload, msg->payload_size);
-    msg->cksum += calc_cksum(msg->payload, msg->payload_size);
+    out_buffer[0] = 'b';
+    out_buffer[1] = msg->payload_size;
+    memcpy(&out_buffer[2], msg->payload, msg->payload_size);
 
-    // send checksum
-    write_char(msg->cksum);
+    out_buffer[2 + msg->payload_size] = calc_cksum(out_buffer, 2 + msg->payload_size);
 
+    write_buffer(out_buffer, 2 + msg->payload_size + 1);
     return;
 }
 
@@ -126,7 +126,7 @@ int read_baca(struct baca_protocol *msg)
  */
 void write_char(uint8_t c)
 {
-    write_buffer(&c, 1);
+    tty_write(&tty, (const void*) &c, 1);
 }
 
 /**
@@ -137,11 +137,7 @@ void write_char(uint8_t c)
  */
 void write_buffer(uint8_t *buffer, int len)
 {
-    k_mutex_lock(&uart_tx_mutex, K_FOREVER);
-    k_sem_take(&tx_semaphore, K_FOREVER);
-    int status = uart_tx(uart_dev, buffer, len, SYS_FOREVER_US);
-    k_mutex_unlock(&uart_tx_mutex);
-
+    tty_write(&tty, (const void*) buffer, len);
     return;
 }
 
@@ -154,7 +150,7 @@ uint8_t read_char()
 {
     uint8_t c;
 
-    read_buffer(&c, 1);
+    tty_read(&tty, (void*) &c, 1);
 
     return c;
 }
@@ -167,41 +163,7 @@ uint8_t read_char()
  */
 void read_buffer(uint8_t *buf, int len)
 {
-    k_mutex_lock(&uart_rx_mutex, K_FOREVER);
-
-    // uart_rx_enable(uart_dev, buf, len, 0);
-
-    for (int i = 0; i < len; i++)
-    {
-        while(uart_poll_in(uart_dev, &buf[i]) == -1)
-            sleep_ms(5);
-    }
-
-    // k_sem_take(&rx_semaphore, K_FOREVER);
-    k_mutex_unlock(&uart_rx_mutex);
+    tty_read(&tty, (void*) buf, len);
 
     return;
-}
-
-/**
- * @brief UART callback interrupt
- * 
- * @param dev pointer to device structure
- * @param evt pointer to event structure
- * @param user_data user data
- */
-void uart_callback(const struct device *dev, struct uart_event *evt, void *user_data)
-{
-    int event_type = evt->type;
-
-    switch (event_type)
-    {
-    case UART_RX_BUF_RELEASED:
-        k_sem_give(&rx_semaphore);
-        break;
-    case UART_TX_DONE:
-        k_sem_give(&tx_semaphore);
-    default:
-        break;
-    }
 }

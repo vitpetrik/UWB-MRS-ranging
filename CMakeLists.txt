@@ -7,13 +7,14 @@ find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(hello_world)
 
 # add_subdirectory(decadriver)
-include_directories(decadriver platform protocol inc ranging)
+include_directories(decadriver platform protocol inc ranging tty)
 
 target_sources(app PRIVATE 
     src/main.c
     src/uwb_threads.c
     src/uwb_transport.c
     src/uart.c
+    src/ros.c
     platform/deca_spi.c
     platform/deca_mutex.c
     platform/deca_sleep.c
@@ -23,6 +24,7 @@ target_sources(app PRIVATE
     protocol/data_msg.pb.c
     ranging/ranging.cpp
     protocol/mac.c
+    tty/tty.c
     # baca/baca.c
 )
 

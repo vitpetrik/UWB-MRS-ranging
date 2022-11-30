@@ -82,4 +82,34 @@ struct device_t
     struct ranging_t ranging;
 };
 
+struct ranging_msg_t {
+    uint16_t source_mac;
+
+    float range;
+    float variance;
+};
+
+struct uwb_data_msg_t {
+    uint16_t source_mac;
+    uint16_t destination_mac;
+
+    uint8_t msg_type;
+    uint8_t payload_size;
+    uint8_t payload[128];
+};
+
+enum {
+    RANGING_DATA,
+    UWB_DATA
+};
+
+struct uwb_msg_t {
+    uint8_t msg_type;
+
+    union {
+        struct ranging_msg_t ranging_msg;
+        struct uwb_data_msg_t uwb_data_msg;
+    } data;
+}__attribute__((aligned(4)));
+
 #endif

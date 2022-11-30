@@ -4,9 +4,9 @@
  * @brief Main entry point to UWB positioning sytem
  * @version 0.1
  * @date 2022-11-15
- * 
+ *
  * @copyright Copyright (c) 2022
- * 
+ *
  */
 
 #include <zephyr/zephyr.h>
@@ -33,6 +33,7 @@
 
 #include "mac.h"
 #include "uart.h"
+#include "ros.h"
 
 /* Example application name and version to display on LCD screen. */
 #define APP_NAME "MRS UWB v0.1"
@@ -41,7 +42,6 @@ const char *buildString = "Build was compiled at " __DATE__ ", " __TIME__ ".";
 uint16_t DEVICE_ID;
 uint16_t PAN_ID;
 uint8_t SEQ_NUM;
-
 
 // UART
 
@@ -69,24 +69,28 @@ static dwt_config_t config = {
     (128 + 8 + 1)    /* SFD timeout (preamble length + 1 + SFD length - PAC size). Used in RX only. */
 };
 
+K_MSGQ_DEFINE(uwb_msgq, sizeof(struct uwb_msg_t), 10, 4);
+
 // Threads declarations
 
 /**
  * @brief Receive and process data from ROS (or PC)
- * 
+ *
  */
 void ros_rx_thread(void);
+void ros_tx_thread(void);
 
 // Threads definitions
 
 K_THREAD_DEFINE(ros_rx_thr, 1024, ros_rx_thread, NULL, NULL, NULL, 5, 0, 0);
+K_THREAD_DEFINE(ros_tx_thr, 1024, ros_tx_thread, NULL, NULL, NULL, 5, 0, 0);
 
 K_THREAD_DEFINE(uwb_beacon_thr, 1024, uwb_beacon_thread, NULL, NULL, NULL, 5, 0, 0);
 K_THREAD_DEFINE(uwb_ranging_thr, 1024, uwb_ranging_thread, NULL, NULL, NULL, 5, 0, 0);
 
 K_THREAD_DEFINE(uwb_ranging_print_thr, 1024, uwb_ranging_print_thread, NULL, NULL, NULL, 7, 0, 0);
 
-K_THREAD_DEFINE(ranging_thr, 1024, ranging_thread, NULL, NULL, NULL, 3, 0, 0);
+K_THREAD_DEFINE(ranging_thr, 1024, ranging_thread, NULL, NULL, NULL, -3, 0, 0);
 K_THREAD_DEFINE(uwb_tx_thr, 1024, uwb_tx_thread, NULL, NULL, NULL, -2, 0, 0);
 
 K_THREAD_DEFINE(dwt_isr_thr, 1024, dwt_isr_thread, NULL, NULL, NULL, -1, 0, 0);
@@ -165,16 +169,8 @@ void main(void)
     //? Heart beat LED
     //? Good to recognize bad things happening.. SEG FAULT etc.
 
-
-    uint8_t hello_world[] = {'H', 'e', 'l', 'l', 'o', ' ', 'w', 'o', 'r', 'l', 'd', '!', '\0'};
-    struct baca_protocol msg;
-
-    msg.payload_size = sizeof(hello_world);
-    memcpy(msg.payload, hello_world, sizeof(hello_world));
-
     while (1)
     {
-        // write_baca(&msg);
         gpio_pin_set_dt(&led1green, 1);
         sleep_ms(200);
         gpio_pin_set_dt(&led1green, 0);
@@ -183,25 +179,80 @@ void main(void)
         sleep_ms(200);
         gpio_pin_set_dt(&led1green, 0);
         sleep_ms(600);
+
+        struct uwb_msg_t uwb_msg;
+
+        uwb_msg.msg_type = RANGING_DATA;
+        uwb_msg.data.ranging_msg.source_mac = 0x69;
+        uwb_msg.data.ranging_msg.range = 69.0F;
+        uwb_msg.data.ranging_msg.variance = 255.0F;
+
+        k_msgq_put(&uwb_msgq, &uwb_msg, K_FOREVER);
     }
 
     return;
 }
 
-
-/**
- * @brief Receive and process data from ROS
- * 
- */
-void ros_rx_thread(void)
+void ros_tx_thread(void)
 {
-    return;
     struct baca_protocol msg;
+    struct ros_msg_t ros;
+
+    struct uwb_msg_t uwb_msg;
 
     while(1)
     {
+        int status = k_msgq_get(&uwb_msgq, (void*) &uwb_msg, K_FOREVER);
+
+        if(status != 0)
+            continue;
+
+        switch (uwb_msg.msg_type)
+        {
+        case RANGING_DATA:
+            ros.mode = 'a';
+            ros.address = RANGING_RESULT;
+
+            ros.data.ranging_msg = uwb_msg.data.ranging_msg;
+            break;
+        case UWB_DATA:
+            ros.mode = 'a';
+            ros.address = TRX_DATA;
+
+            ros.data.uwb_data_msg = uwb_msg.data.uwb_data_msg;
+            break;
+        default:
+            break;
+        }
+
+        msg.payload_size = serialize_ros(&ros, msg.payload);
+        write_baca(&msg);
+    }
+}
+
+/**
+ * @brief Receive and process data from ROS
+ *
+ */
+void ros_rx_thread(void)
+{
+    struct baca_protocol msg;
+    struct ros_msg_t ros;
+
+    while (1)
+    {
         int payload_length = read_baca(&msg);
 
-        printf("Something just got received\n\r");
+        deserialize_ros(&ros, &msg.payload);
+
+        if (ros.address == WHO_I_AM && ros.mode == 'r')
+        {
+            ros.mode = 'a';
+
+            memcpy (&ros.data.id_msg.id, APP_NAME, sizeof(APP_NAME));
+
+            msg.payload_size = serialize_ros(&ros, msg.payload);
+            write_baca(&msg);
+        }
     }
 }

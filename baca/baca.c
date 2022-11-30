@@ -52,13 +52,9 @@ void write_baca(uint8_t* data, int data_length)
     write_char('b');
 
     // write payload size
-    uint8_t payload_size = 1 + data_length;
+    uint8_t payload_size = data_length;
     write_char(payload_size);
     checksum += payload_size;
-
-    // write message id
-    write_char(MESSAGE_ID);
-    checksum += MESSAGE_ID;
 
     // write the actual data
     write_buffer(data, data_length);

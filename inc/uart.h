@@ -91,15 +91,6 @@ uint8_t read_char();
  */
 void read_buffer(uint8_t *buf, int len);
 
-/**
- * @brief UART callback interrupt
- * 
- * @param dev pointer to device structure
- * @param evt pointer to event structure
- * @param user_data user data
- */
-void uart_callback(const struct device *dev, struct uart_event *evt, void *user_data);
-
 #ifdef __cplusplus
 }
 #endif

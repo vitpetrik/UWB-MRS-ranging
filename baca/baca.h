@@ -21,31 +21,7 @@ extern "C"
 {
 #endif
 
-/**
- * @brief Write buffer to COM port
- * 
- * @param data pointer to data
- * @param data_length length of the data in uint8_t size
- * @return uint8_t returns checksum of sent data
- */
-uint8_t calc_cksum(uint8_t *data, int data_length);
 
-/**
- * @brief Write buffer accoring to BACA protocol
- * 
- * @param data pointer to data
- * @param data_length length of the data in uint8_t size
- */
-void write_baca(uint8_t *data, int data_length);
-
-/**
- * @brief Read data into buffer
- * 
- * @param buffer pointer to received payload
- * @param buflen length of the buffer
- * @return int length of received data
- */
-int read_baca(uint8_t *buffer, int buflen);
 
 #ifdef __cplusplus
 }

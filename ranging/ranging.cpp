@@ -248,6 +248,12 @@ int rx_ranging_ds(const uint16_t source_id, void *msg, struct rx_details_t *queu
     device->ranging.new_data = true;
     k_sem_give(&print_ranging_semaphore);
 
+    struct uwb_msg_t uwb_msg;
+    uwb_msg.msg_type = RANGING_DATA;
+    uwb_msg.data.ranging_msg.source_mac = source_id;
+    uwb_msg.data.ranging_msg.range = device->ranging.distance;
+
+    k_msgq_put(&uwb_msgq, &uwb_msg, K_FOREVER);
 
     struct baca_protocol ros;
 
@@ -318,7 +324,7 @@ void uwb_ranging_thread(void)
         sleep_ms(10);
     }
 }
-ww
+
 // RANGING THREAD
 void uwb_ranging_print_thread(void)
 {
