@@ -196,6 +196,8 @@ int rx_ranging_ds(const uint16_t source_id, void *msg, struct rx_details_t *queu
         struct device_t *dev_ptr = (struct device_t *)k_calloc(1, sizeof(struct device_t));
         __ASSERT_NO_MSG(dev_ptr != NULL);
 
+        stats_init(&dev_ptr->ranging.stats);
+
         dev_ptr->id = source_id;
 
         dev_ptr->ranging.last_meas_time = k_uptime_get_32();
@@ -224,7 +226,7 @@ int rx_ranging_ds(const uint16_t source_id, void *msg, struct rx_details_t *queu
         .ranging = 1,
         .tx_mode = DWT_START_TX_DELAYED | DWT_RESPONSE_EXPECTED,
         .tx_timestamp = &(devices_map[source_id]->ranging.tx_timestamp),
-        .tx_delay = {.rx_timestamp = queue_data->rx_timestamp, .reserved_time = 500}};
+        .tx_delay = {.rx_timestamp = queue_data->rx_timestamp, .reserved_time = 800}};
 
     memcpy(&(buffer_tx[0]), &Ra, sizeof(uint32_t));
     memcpy(&(buffer_tx[1]), &Rb, sizeof(uint32_t));
@@ -246,22 +248,26 @@ int rx_ranging_ds(const uint16_t source_id, void *msg, struct rx_details_t *queu
     device->ranging.last_meas_time = k_uptime_get_32();
     device->ranging.distance = dist;
     device->ranging.new_data = true;
+
     k_sem_give(&print_ranging_semaphore);
 
-    struct uwb_msg_t uwb_msg;
-    uwb_msg.msg_type = RANGING_DATA;
-    uwb_msg.data.ranging_msg.source_mac = source_id;
-    uwb_msg.data.ranging_msg.range = device->ranging.distance;
+    struct statistics_t *stats = &device->ranging.stats;
+    stats_update(stats, device->ranging.distance);
 
-    k_msgq_put(&uwb_msgq, &uwb_msg, K_FOREVER);
+    if (stats_get_step(stats) >= 20)
+    {
+        struct uwb_msg_t uwb_msg;
 
-    struct baca_protocol ros;
+        uwb_msg.msg_type = RANGING_DATA;
+        uwb_msg.data.ranging_msg.source_mac = source_id;
+        uwb_msg.data.ranging_msg.range = stats_get_mean(stats);
+        uwb_msg.data.ranging_msg.variance = stats_get_variance(stats);
 
-    sprintf((char*) ros.payload, "dist %.2f", dist);
+        stats_reset(stats);
 
-    ros.payload_size = strlen((char*) ros.payload);
+        k_msgq_put(&uwb_msgq, &uwb_msg, K_FOREVER);
+    }
 
-    write_baca(&ros);
 
     return 0;
 }
@@ -311,6 +317,8 @@ void uwb_ranging_thread(void)
 
             device->ranging.last_meas_time = k_uptime_get_32();
             device->ranging.tx_timestamp = 0;
+
+            stats_init(&device->ranging.stats);
 
             uint32_t empty[3] = {0, 0, 0};
 

@@ -82,8 +82,8 @@ void ros_tx_thread(void);
 
 // Threads definitions
 
-K_THREAD_DEFINE(ros_rx_thr, 1024, ros_rx_thread, NULL, NULL, NULL, 5, 0, 0);
-K_THREAD_DEFINE(ros_tx_thr, 1024, ros_tx_thread, NULL, NULL, NULL, 5, 0, 0);
+K_THREAD_DEFINE(ros_rx_thr, 1024, ros_rx_thread, NULL, NULL, NULL, 6, 0, 0);
+K_THREAD_DEFINE(ros_tx_thr, 1024, ros_tx_thread, NULL, NULL, NULL, 6, 0, 0);
 
 K_THREAD_DEFINE(uwb_beacon_thr, 1024, uwb_beacon_thread, NULL, NULL, NULL, 5, 0, 0);
 K_THREAD_DEFINE(uwb_ranging_thr, 1024, uwb_ranging_thread, NULL, NULL, NULL, 5, 0, 0);
@@ -179,15 +179,6 @@ void main(void)
         sleep_ms(200);
         gpio_pin_set_dt(&led1green, 0);
         sleep_ms(600);
-
-        struct uwb_msg_t uwb_msg;
-
-        uwb_msg.msg_type = RANGING_DATA;
-        uwb_msg.data.ranging_msg.source_mac = 0x69;
-        uwb_msg.data.ranging_msg.range = 69.0F;
-        uwb_msg.data.ranging_msg.variance = 255.0F;
-
-        k_msgq_put(&uwb_msgq, &uwb_msg, K_FOREVER);
     }
 
     return;

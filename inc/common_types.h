@@ -9,6 +9,7 @@
 #include "deca_device_api.h"
 
 #include "mac.h"
+#include "statistics.h"
 
 typedef enum
 {
@@ -72,6 +73,8 @@ struct ranging_t
     int32_t counter;
     int32_t integrator;
     float rx_power;
+
+    struct statistics_t stats;
 };
 
 struct device_t

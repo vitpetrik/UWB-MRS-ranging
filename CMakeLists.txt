@@ -9,12 +9,13 @@ project(hello_world)
 # add_subdirectory(decadriver)
 include_directories(decadriver platform protocol inc ranging tty)
 
-target_sources(app PRIVATE 
+target_sources(app PRIVATE
     src/main.c
     src/uwb_threads.c
     src/uwb_transport.c
     src/uart.c
     src/ros.c
+    src/statistics.c
     platform/deca_spi.c
     platform/deca_mutex.c
     platform/deca_sleep.c
