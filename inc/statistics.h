@@ -15,6 +15,7 @@
 struct statistics_t {
     float mean;
     float sum;
+    float raw;
     int step;
 };
 
@@ -52,6 +53,14 @@ void stats_reset(struct statistics_t *stats);
  * @return float mean
  */
 float stats_get_mean(const struct statistics_t *stats);
+
+/**
+ * @brief Gets value of mean
+ * 
+ * @param stats pointer to structure_t
+ * @return float raw value
+ */
+float stats_get_raw(const struct statistics_t *stats);
 
 /**
  * @brief Gets value of variance
