@@ -22,7 +22,7 @@ void uwb_tx_thread(void);
  * @brief Thread that handles dwt interrupts, gets woken up by interrupt
  * 
  */
-void dwt_isr_thread(void);
+void dwt_isr_handler(struct k_work *item);
 
 /**
  * @brief Interrupt Transission is dones

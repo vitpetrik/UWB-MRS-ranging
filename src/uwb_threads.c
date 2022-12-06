@@ -35,8 +35,6 @@ K_FIFO_DEFINE(uwb_rx_fifo);
 // Condvar for waiting for the interrupt
 K_CONDVAR_DEFINE(tx_condvar);
 
-K_SEM_DEFINE(isr_semaphore, 0, 10);
-
 /**
  * @brief Transmit data from the queue
  * 
@@ -125,16 +123,14 @@ void uwb_tx_thread(void)
  * @brief Thread that handles dwt interrupts, gets woken up by interrupt
  * 
  */
-void dwt_isr_thread(void)
+void dwt_isr_handler(struct k_work *item)
 {
-    while (1)
-    {
-        k_sem_take(&isr_semaphore, K_FOREVER);
-        k_mutex_lock(&dwt_mutex, K_FOREVER);
-        dwt_isr();
-        k_mutex_unlock(&dwt_mutex);
-    }
+    k_mutex_lock(&dwt_mutex, K_FOREVER);
+    dwt_isr();
+    k_mutex_unlock(&dwt_mutex);
 }
+K_WORK_DEFINE(isr_work , dwt_isr_handler);
+
 
 /**
  * @brief Interrupt Transission is dones
@@ -228,6 +224,7 @@ void uwb_rxok(const dwt_cb_data_t *data)
  */
 void dwm_int_callback(const struct device *dev, struct gpio_callback *cb, uint32_t pins)
 {
-    k_sem_give(&isr_semaphore);
+    k_work_submit(&isr_work);
+
     return;
 }
