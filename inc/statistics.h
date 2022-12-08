@@ -12,11 +12,15 @@
 #ifndef __STATISTICS_H__
 #define __STATISTICS_H__
 
+#include <zephyr/sys/ring_buffer.h>
+
 struct statistics_t {
     float mean;
-    float sum;
+    float sum2;
     float raw;
     int step;
+    struct ring_buf ring_val;
+    struct ring_buf ring_sum;
 };
 
 #ifdef __cplusplus
@@ -27,8 +31,9 @@ struct statistics_t {
  * @brief Initialize struct for handling statistics data
  * 
  * @param stats pointer to statistics_t
+ * @param size size of ring buffer (aka sliding window size)
  */
-void stats_init(struct statistics_t *stats);
+void stats_init(struct statistics_t *stats, int size);
 
 /**
  * @brief Update statistics with new value
@@ -45,6 +50,13 @@ void stats_update(struct statistics_t *stats, const float val);
  * @param stats pointer to statistics_t
  */
 void stats_reset(struct statistics_t *stats);
+
+/**
+ * @brief Destroy dynamic arrays
+ * 
+ * @param stats pointer to statistics_t
+ */
+void stats_destroy(struct statistics_t *stats);
 
 /**
  * @brief Gets value of mean

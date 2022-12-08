@@ -5,6 +5,8 @@
 #include <string.h>
 #include <math.h>
 
+#include <zephyr/random/rand32.h>
+
 #include <pb_encode.h>
 #include <pb_decode.h>
 
@@ -23,8 +25,8 @@ typedef std::unordered_map<uint32_t, struct device_t *> devices_map_t;
 typedef std::unordered_map<uint16_t, uint64_t *> tx_timestamps_map_t;
 
 tx_timestamps_map_t tx_timestamps_map;
-devices_map_t devices_map;
 
+devices_map_t devices_map;
 K_SEM_DEFINE(print_ranging_semaphore, 0, 1);
 
 /**
@@ -34,47 +36,37 @@ K_SEM_DEFINE(print_ranging_semaphore, 0, 1);
 void ranging_thread(void)
 {
     printf("Rx thread started\n\r");
+    struct rx_queue_t data;
 
     while (1)
     {
         // wait for data
-        struct rx_queue_t *data = read_uwb();
+        read_uwb(&data);
 
-        // Send the data to higher layer
-        rx_message(data);
+        int source_id = data.mac_data.source_id;
+        struct rx_details_t *rx_details = &data.rx_details;
+        rx_details->tx_delay = data.mac_data.tx_delay;
 
-        // FREE QUEUE DATA
-        k_free(data->buffer_rx_free_ptr);
-        k_free(data);
+        void *offseted_buf = &data.buffer_rx[data.buf_offset];
+
+        int status = SUCCESS;
+        switch (data.mac_data.msg_type)
+        {
+        case BEACON_MSG:
+            status = rx_beacon(source_id, offseted_buf);
+            break;
+        case RANGING_INIT_MSG:
+        case RANGING_RESPONSE_MSG:
+            // No longer implemented
+            break;
+        case RANGING_DS_MSG:
+            status = rx_ranging_ds(source_id, offseted_buf, rx_details);
+            break;
+        default:
+            printf("Unknown message type\n\r");
+            break;
+        }
     }
-}
-
-int rx_message(struct rx_queue_t *queue_data)
-{
-    int source_id = queue_data->mac_data.source_id;
-    struct rx_details_t *rx_details = &queue_data->rx_details;
-    rx_details->tx_delay = queue_data->mac_data.tx_delay;
-
-    int status = SUCCESS;
-    switch (queue_data->mac_data.msg_type)
-    {
-    case BEACON_MSG:
-        status = rx_beacon(source_id, (void *)queue_data->buffer_rx);
-        break;
-    case RANGING_INIT_MSG:
-        status = rx_ranging_init(source_id, (void *)queue_data->buffer_rx, rx_details);
-        break;
-    case RANGING_RESPONSE_MSG:
-        status = rx_ranging_response(source_id, (void *)queue_data->buffer_rx, rx_details);
-        break;
-    case RANGING_DS_MSG:
-        status = rx_ranging_ds(source_id, (void *)queue_data->buffer_rx, rx_details);
-        break;
-    default:
-        printf("Unknown message type\n\r");
-        break;
-    }
-    return status;
 }
 
 // PROCESS BEACON TYPE MESSAGE
@@ -90,9 +82,10 @@ int rx_beacon(const uint16_t source_id, void *msg)
         struct device_t *dev_ptr = (struct device_t *)k_calloc(1, sizeof(struct device_t));
         __ASSERT_NO_MSG(dev_ptr != NULL);
 
-
         devices_map[source_id] = dev_ptr;
         devices_map[source_id]->ranging = {0, 0, 0, 0, 0, 0, 0};
+
+        stats_init(&dev_ptr->ranging.stats, 20);
     }
     struct device_t *device = devices_map[source_id];
 
@@ -100,75 +93,6 @@ int rx_beacon(const uint16_t source_id, void *msg)
     device->uav_type = beacon.uav_type;
     device->GPS[0] = beacon.GPS[0];
     device->GPS[1] = beacon.GPS[1];
-
-    return 0;
-}
-
-int rx_ranging_init(const uint16_t source_id, void *msg, struct rx_details_t *rx_details)
-{
-    struct tx_details_t tx_details = {
-        .ranging = 1,
-        .tx_mode = DWT_START_TX_DELAYED | DWT_RESPONSE_EXPECTED,
-        .tx_timestamp = NULL,
-        .tx_delay = {.rx_timestamp = rx_details->rx_timestamp, .reserved_time = 500}};
-
-    // write_uwb(source_id, DATA, RANGING_RESPONSE_MSG, (const uint8_t *)&(rx_details->carrier_integrator), sizeof(int32_t), &tx_details);
-    write_uwb(source_id, DATA, RANGING_RESPONSE_MSG, (const uint8_t *)NULL, 0, &tx_details);
-
-    return 0;
-}
-
-int rx_ranging_response(const uint16_t source_id, void *msg, struct rx_details_t *rx_details)
-{
-    if (not devices_map.count(source_id))
-        return -1;
-
-    struct device_t *device = (struct device_t *)devices_map[source_id];
-
-    int32_t responder_integrator;
-    memcpy(&responder_integrator, msg, sizeof(int32_t));
-
-    int32_t integrator = (rx_details->carrier_integrator - responder_integrator) >> 1;
-
-    if (device->ranging.counter < 1)
-        device->ranging.integrator = integrator;
-    else
-        device->ranging.integrator = INTEGRATOR_ALPHA * integrator + (1 - INTEGRATOR_ALPHA) * device->ranging.integrator;
-
-    double clockOffsetRatio = device->ranging.integrator * (FREQ_OFFSET_MULTIPLIER * HERTZ_TO_PPM_MULTIPLIER_CHAN_5 / 1.0e6);
-
-    // CALCULATE DISTANCE
-    uint64_t rx_timestamp = rx_details->rx_timestamp;
-    uint64_t tx_timestamp = device->ranging.tx_timestamp;
-
-    long timespan;
-    if (rx_timestamp > tx_timestamp)
-    {
-        timespan = rx_timestamp - tx_timestamp;
-    }
-    else
-    {
-        timespan = rx_timestamp + (0x000000ffffffffffU - tx_timestamp);
-    }
-
-    double diff = timespan - (1 - clockOffsetRatio) * rx_details->tx_delay;
-
-    double tof = (diff / 2.) * DWT_TIME_UNITS;
-    double dist = tof * SPEED_OF_LIGHT + 0.09;
-
-    if (device->ranging.counter < 1)
-        device->ranging.distance = dist;
-    else
-        device->ranging.distance = DISTANCE_ALPHA * dist + (1 - DISTANCE_ALPHA) * device->ranging.distance;
-
-    device->ranging.rx_power = rx_details->rx_power;
-
-    printf("%g, %f, %i, %lu, %u\n", device->ranging.distance, rx_details->rx_power, integrator, timespan, rx_details->tx_delay);
-
-    device->ranging.new_data = true;
-    k_sem_give(&print_ranging_semaphore);
-
-    device->ranging.counter++;
 
     return 0;
 }
@@ -196,7 +120,7 @@ int rx_ranging_ds(const uint16_t source_id, void *msg, struct rx_details_t *queu
         struct device_t *dev_ptr = (struct device_t *)k_calloc(1, sizeof(struct device_t));
         __ASSERT_NO_MSG(dev_ptr != NULL);
 
-        stats_init(&dev_ptr->ranging.stats);
+        stats_init(&dev_ptr->ranging.stats, 20);
 
         dev_ptr->id = source_id;
 
@@ -204,15 +128,17 @@ int rx_ranging_ds(const uint16_t source_id, void *msg, struct rx_details_t *queu
         devices_map[source_id] = dev_ptr;
     }
 
+    struct device_t *device = (struct device_t *)devices_map[source_id];
+
     if (Rb == 0 && Ra == 0 && Da == 0)
     {
-        devices_map[source_id]->ranging.tx_timestamp = 0;
-        devices_map[source_id]->ranging.rx_timestamp = 0;
+        device->ranging.tx_timestamp = 0;
+        device->ranging.rx_timestamp = 0;
     }
     else
     {
         uint64_t rx_timestamp = queue_data->rx_timestamp;
-        uint64_t tx_timestamp = devices_map[source_id]->ranging.tx_timestamp;
+        uint64_t tx_timestamp = device->ranging.tx_timestamp;
 
         if (rx_timestamp > tx_timestamp)
             Ra = rx_timestamp - tx_timestamp;
@@ -220,19 +146,19 @@ int rx_ranging_ds(const uint16_t source_id, void *msg, struct rx_details_t *queu
             Ra = rx_timestamp + (0x000000ffffffffffU - tx_timestamp);
     }
 
-    struct device_t *device = (struct device_t *)devices_map[source_id];
-
     struct tx_details_t tx_details = {
         .ranging = 1,
         .tx_mode = DWT_START_TX_DELAYED | DWT_RESPONSE_EXPECTED,
-        .tx_timestamp = &(devices_map[source_id]->ranging.tx_timestamp),
-        .tx_delay = {.rx_timestamp = queue_data->rx_timestamp, .reserved_time = 800}};
+        .tx_timestamp = &(device->ranging.tx_timestamp),
+        .tx_delay = {.rx_timestamp = queue_data->rx_timestamp, .reserved_time = 1000}};
 
     memcpy(&(buffer_tx[0]), &Ra, sizeof(uint32_t));
     memcpy(&(buffer_tx[1]), &Rb, sizeof(uint32_t));
     memcpy(&(buffer_tx[2]), &Db, sizeof(uint32_t));
 
-    write_uwb(source_id, DATA, RANGING_DS_MSG, (const uint8_t *)buffer_tx, 3 * sizeof(uint32_t), &tx_details);
+    sleep_ms(4);
+
+    write_uwb(source_id, MAC_COMMAND, RANGING_DS_MSG, (const uint8_t *)buffer_tx, 3 * sizeof(uint32_t), &tx_details);
 
     if (Ra == 0 || Da == 0 || Rb == 0 || Db == 0)
         return 0;
@@ -246,28 +172,18 @@ int rx_ranging_ds(const uint16_t source_id, void *msg, struct rx_details_t *queu
     }
 
     device->ranging.last_meas_time = k_uptime_get_32();
-    device->ranging.distance = dist;
-    device->ranging.new_data = true;
-
-    k_sem_give(&print_ranging_semaphore);
 
     struct statistics_t *stats = &device->ranging.stats;
-    stats_update(stats, device->ranging.distance);
+    stats_update(stats, dist);
 
-    if (stats_get_step(stats) >= 20)
-    {
-        struct uwb_msg_t uwb_msg;
+    struct uwb_msg_t uwb_msg;
 
-        uwb_msg.msg_type = RANGING_DATA;
-        uwb_msg.data.ranging_msg.source_mac = source_id;
-        uwb_msg.data.ranging_msg.range = stats_get_mean(stats);
-        uwb_msg.data.ranging_msg.variance = stats_get_variance(stats);
+    uwb_msg.msg_type = RANGING_DATA;
+    uwb_msg.data.ranging_msg.source_mac = source_id;
+    uwb_msg.data.ranging_msg.range = stats_get_mean(stats);
+    uwb_msg.data.ranging_msg.variance = stats_get_variance(stats);
 
-        stats_reset(stats);
-
-        k_msgq_put(&uwb_msgq, &uwb_msg, K_FOREVER);
-    }
-
+    k_msgq_put(&uwb_msgq, &uwb_msg, K_FOREVER);
 
     return 0;
 }
@@ -312,13 +228,15 @@ void uwb_ranging_thread(void)
             uint32_t device_id = node.first;
             struct device_t *device = (struct device_t *)node.second;
 
+            uint32_t rand = sys_rand32_get();
+
             if ((k_uptime_get_32() - device->ranging.last_meas_time) < 50)
                 continue;
 
             device->ranging.last_meas_time = k_uptime_get_32();
             device->ranging.tx_timestamp = 0;
 
-            stats_init(&device->ranging.stats);
+            stats_reset(&device->ranging.stats);
 
             uint32_t empty[3] = {0, 0, 0};
 
@@ -327,9 +245,9 @@ void uwb_ranging_thread(void)
                 .tx_mode = DWT_START_TX_IMMEDIATE | DWT_RESPONSE_EXPECTED,
                 .tx_timestamp = &(device->ranging.tx_timestamp)};
 
-            write_uwb(device_id, DATA, RANGING_DS_MSG, (uint8_t *)empty, 3 * sizeof(uint32_t), &tx_details);
+            write_uwb(device_id, MAC_COMMAND, RANGING_DS_MSG, (uint8_t *)empty, 3 * sizeof(uint32_t), &tx_details);
         }
-        sleep_ms(10);
+        sleep_ms(100 + 20 * (sys_rand32_get() / INT_MAX - 1));
     }
 }
 
@@ -361,7 +279,7 @@ void uwb_ranging_print_thread(void)
             {
                 printf("\33[31m");
             }
-            printf(" · Distance to node 0x%X: %.2f m | %.2f dBm\n\r", device->id, device->ranging.distance, device->ranging.rx_power);
+            printf(" · Distance to node 0x%X: %.2f m\n\r", device->id, device->ranging.stats.mean);
             printf("\33[39m");
 
             device->ranging.new_data = false;

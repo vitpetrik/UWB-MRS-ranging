@@ -20,7 +20,8 @@
         "common_variables.h": "c",
         "uart.h": "c",
         "tty.h": "c",
-        "ros.h": "c"
+        "ros.h": "c",
+        "ring_buffer.h": "c"
     },
     "cortex-debug.variableUseNaturalFormat": false
 }

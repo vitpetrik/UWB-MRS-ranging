@@ -12,6 +12,8 @@
 #ifndef __UWB_THREADS_H__
 #define __UWB_THREADS_H__
 
+#include "deca_device_api.h"
+
 /**
  * @brief Transmitting thread, waits for queue
  *

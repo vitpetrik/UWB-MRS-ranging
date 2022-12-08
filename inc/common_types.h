@@ -33,11 +33,11 @@ struct rx_details_t
 
 struct rx_queue_t
 {
-    uint8_t *buffer_rx;
-    uint8_t *buffer_rx_free_ptr;
+    uint8_t buffer_rx[128];
+    uint8_t buf_offset;
     struct rx_details_t rx_details;
     struct mac_data_t mac_data;
-};
+}__attribute__((aligned(4)));
 
 struct tx_delay_t
 {
@@ -55,24 +55,19 @@ struct tx_details_t
 
 struct tx_queue_t
 {
+    uint8_t frame_buffer[128];
     uint16_t frame_length;
-    uint8_t *frame_buffer;
     struct tx_details_t tx_details;
     struct mac_data_t mac_data;
-};
+}__attribute__((aligned(4)));
 
 // DATA STRUCTURE DEFINITIONS
 struct ranging_t
 {
-    double distance;
-    double delay;
     uint8_t new_data;
     uint64_t tx_timestamp;
     uint64_t rx_timestamp;
     uint32_t last_meas_time;
-    int32_t counter;
-    int32_t integrator;
-    float rx_power;
 
     struct statistics_t stats;
 };

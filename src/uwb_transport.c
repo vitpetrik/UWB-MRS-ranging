@@ -25,11 +25,7 @@
 void write_uwb(const uint16_t destination_id, const frame_type_t frame_type, const int msg_type, const uint8_t *msg, int len, struct tx_details_t *tx_details)
 {
     // ALLOCATE MEMORY FOR tx BUFFER AND QUEUE DATA
-    uint8_t *buffer_tx = (uint8_t *)k_calloc(ENCODED_MAC_LENGTH + len, sizeof(uint8_t));
-    __ASSERT_NO_MSG(buffer_tx != NULL);
-
-    struct tx_queue_t *queue_data = (struct tx_queue_t *)k_calloc(1, sizeof(struct tx_queue_t));
-    __ASSERT_NO_MSG(queue_data != NULL);
+    struct tx_queue_t queue_data;
 
     struct mac_data_t mac_data = {
         .frame_ctrl = 0x9840 | frame_type,
@@ -41,22 +37,19 @@ void write_uwb(const uint16_t destination_id, const frame_type_t frame_type, con
         .tx_delay = 0,
     };
 
-    memcpy(&buffer_tx[ENCODED_MAC_LENGTH], msg, len);
+    memcpy(&queue_data.frame_buffer[ENCODED_MAC_LENGTH], msg, len);
 
     // INITIALIZE QUEUE DATA
-    queue_data->frame_buffer = buffer_tx;
-    queue_data->frame_length = len;
-    queue_data->tx_details = *tx_details;
-    queue_data->mac_data = mac_data;
+    queue_data.frame_length = len;
+    queue_data.tx_details = *tx_details;
+    queue_data.mac_data = mac_data;
 
     // SEND DATA TO TX QUEUE
-    k_fifo_alloc_put(&uwb_tx_fifo, queue_data);
+    k_msgq_put(&uwb_tx_msgq, &queue_data, K_FOREVER);
 }
 
 
-struct rx_queue_t* read_uwb()
+int read_uwb(struct rx_queue_t *data)
 {
-    struct rx_queue_t *data = (struct rx_queue_t *)k_fifo_get(&uwb_rx_fifo, K_FOREVER);
-
-    return data;
+    return k_msgq_get(&uwb_rx_msgq, data, K_FOREVER);
 }

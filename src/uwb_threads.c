@@ -29,8 +29,9 @@
 struct k_mutex dwt_mutex;
 
 // QUEUES
-K_FIFO_DEFINE(uwb_tx_fifo);
-K_FIFO_DEFINE(uwb_rx_fifo);
+// K_FIFO_DEFINE(uwb_tx_fifo);
+K_MSGQ_DEFINE(uwb_tx_msgq, sizeof(struct tx_queue_t), 5, 4);
+K_MSGQ_DEFINE(uwb_rx_msgq, sizeof(struct rx_queue_t), 5, 4);
 
 // Condvar for waiting for the interrupt
 K_CONDVAR_DEFINE(tx_condvar);
@@ -102,20 +103,20 @@ void uwb_tx_thread(void)
     printf("Tx thread started\n\r");
     k_condvar_init(&tx_condvar);
 
+    struct tx_queue_t tx_queue;
+
     while (1)
     {
         // GET DATA FOR TRANSMITTING THROUGH QUEUE
-        struct tx_queue_t *tx_queue = (struct tx_queue_t *)k_fifo_get(&uwb_tx_fifo, K_FOREVER);
+        k_msgq_get(&uwb_tx_msgq, &tx_queue, K_FOREVER);
 
         // Get the mutex and send the data to lower layer
         k_mutex_lock(&dwt_mutex, K_FOREVER);
 
-        uwb_tx(tx_queue);
+        uwb_tx(&tx_queue);
 
         // UNLOCK THE MTX AND FREE THE DATA
         k_mutex_unlock(&dwt_mutex);
-        k_free(tx_queue->frame_buffer);
-        k_free(tx_queue);
     }
 }
 
@@ -140,6 +141,7 @@ K_WORK_DEFINE(isr_work , dwt_isr_handler);
 void uwb_txdone(const dwt_cb_data_t *data)
 {
     k_condvar_signal(&tx_condvar);
+    return;
 }
 
 /**
@@ -150,6 +152,7 @@ void uwb_txdone(const dwt_cb_data_t *data)
 void uwb_rxto(const dwt_cb_data_t *data)
 {
     dwt_rxenable(DWT_START_RX_IMMEDIATE);
+    return;
 }
 
 /**
@@ -160,6 +163,7 @@ void uwb_rxto(const dwt_cb_data_t *data)
 void uwb_rxerr(const dwt_cb_data_t *data)
 {
     dwt_rxenable(DWT_START_RX_IMMEDIATE);
+    return;
 }
 
 /**
@@ -170,6 +174,7 @@ void uwb_rxerr(const dwt_cb_data_t *data)
 void uwb_rxfrej(const dwt_cb_data_t *data)
 {
     dwt_rxenable(DWT_START_RX_IMMEDIATE | DWT_NO_SYNC_PTRS);
+    return;
 }
 
 /**
@@ -184,33 +189,20 @@ void uwb_rxok(const dwt_cb_data_t *data)
     // dwt_rxenable(DWT_START_RX_IMMEDIATE | DWT_NO_SYNC_PTRS);
 
     // INIT DATA
+    static struct rx_queue_t queue;
     uint16_t msg_length = data->datalength;
-    uint8_t *buffer_rx = k_calloc(msg_length, sizeof(uint8_t));
-
-    __ASSERT_NO_MSG(buffer_rx != NULL);
 
     // READ THE DATA AND ENABLE RX
     uint64_t rx_ts = get_rx_timestamp_u64();
-    dwt_readrxdata(buffer_rx, msg_length, 0);
+    dwt_readrxdata(queue.buffer_rx, msg_length, 0);
 
     struct rx_details_t rx_details = {.carrier_integrator = 0, .rx_timestamp = rx_ts, .rx_power = data->rx_power};
+    queue.rx_details = rx_details;
 
     // INIT QUEUE DATA AND SEND TO RX THREAD THROUGH QUEUE
+    queue.buf_offset = decode_MAC(&queue.mac_data, queue.buffer_rx);
 
-    struct mac_data_t mac_data;
-    int mac_lenght = decode_MAC(&mac_data, buffer_rx);
-
-    struct rx_queue_t *queue = k_calloc(1, sizeof(struct rx_queue_t));
-
-    __ASSERT_NO_MSG(queue != NULL);
-
-
-    queue->mac_data = mac_data;
-    queue->buffer_rx = buffer_rx + mac_lenght;
-    queue->buffer_rx_free_ptr = buffer_rx;
-    queue->rx_details = rx_details;
-
-    k_fifo_alloc_put(&uwb_rx_fifo, queue);
+    k_msgq_put(&uwb_rx_msgq, &queue, K_FOREVER);
 
     return;
 }

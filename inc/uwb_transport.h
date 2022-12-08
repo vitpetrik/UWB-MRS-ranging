@@ -40,7 +40,7 @@ void write_uwb(const uint16_t destination_id, const frame_type_t frame_type, con
  *
  * @return struct rx_queue_t* pointer to received data
  */
-struct rx_queue_t* read_uwb();
+int read_uwb(struct rx_queue_t *data);
 
 #ifdef __cplusplus
 }

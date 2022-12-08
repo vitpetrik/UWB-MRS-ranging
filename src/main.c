@@ -88,7 +88,7 @@ K_THREAD_DEFINE(ros_tx_thr, 1024, ros_tx_thread, NULL, NULL, NULL, 6, 0, 0);
 K_THREAD_DEFINE(uwb_beacon_thr, 1024, uwb_beacon_thread, NULL, NULL, NULL, 5, 0, 0);
 K_THREAD_DEFINE(uwb_ranging_thr, 1024, uwb_ranging_thread, NULL, NULL, NULL, 5, 0, 0);
 
-K_THREAD_DEFINE(uwb_ranging_print_thr, 1024, uwb_ranging_print_thread, NULL, NULL, NULL, 7, 0, 0);
+// K_THREAD_DEFINE(uwb_ranging_print_thr, 1024, uwb_ranging_print_thread, NULL, NULL, NULL, 7, 0, 0);
 
 K_THREAD_DEFINE(ranging_thr, 1024, ranging_thread, NULL, NULL, NULL, -3, 0, 0);
 K_THREAD_DEFINE(uwb_tx_thr, 1024, uwb_tx_thread, NULL, NULL, NULL, -2, 0, 0);
@@ -145,7 +145,7 @@ void main(void)
     dwt_setpanid(PAN_ID);
 
     // Enable frame filtering and rejection
-    dwt_enableframefilter(DWT_FF_DATA_EN, true);
+    dwt_enableframefilter(DWT_FF_DATA_EN | DWT_FF_MAC_EN, true);
     dwt_setdblrxbuffmode(1);
 
     //? Experimentaly set antenna delays
@@ -189,11 +189,11 @@ void ros_tx_thread(void)
 
     struct uwb_msg_t uwb_msg;
 
-    while(1)
+    while (1)
     {
-        int status = k_msgq_get(&uwb_msgq, (void*) &uwb_msg, K_FOREVER);
+        int status = k_msgq_get(&uwb_msgq, (void *)&uwb_msg, K_FOREVER);
 
-        if(status != 0)
+        if (status != 0)
             continue;
 
         switch (uwb_msg.msg_type)
@@ -238,7 +238,7 @@ void ros_rx_thread(void)
         {
             ros.mode = 'a';
 
-            memcpy (&ros.data.id_msg.id, APP_NAME, sizeof(APP_NAME));
+            memcpy(&ros.data.id_msg.id, APP_NAME, sizeof(APP_NAME));
 
             msg.payload_size = serialize_ros(&ros, msg.payload);
             write_baca(&msg);

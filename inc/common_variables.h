@@ -20,8 +20,8 @@ extern uint16_t DEVICE_ID;
 extern uint16_t PAN_ID;
 extern uint8_t SEQ_NUM;
 
-extern struct k_fifo uwb_tx_fifo;
-extern struct k_fifo uwb_rx_fifo;
+extern struct k_msgq uwb_tx_msgq;
+extern struct k_msgq uwb_rx_msgq;
 
 extern struct k_msgq uwb_msgq;
 
