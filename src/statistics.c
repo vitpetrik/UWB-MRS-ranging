@@ -12,6 +12,7 @@
  *
  */
 
+#include <zephyr/sys/__assert.h>
 #include "statistics.h"
 #include <string.h>
 
@@ -28,7 +29,11 @@ void stats_init(struct statistics_t *stats, int size)
     stats->step = 0;
 
     uint32_t *buf_val = k_malloc(2*size*sizeof(uint32_t));
+    __ASSERT(buf_val != NULL, "Could not allocate buf_val!");
+
     uint32_t *buf_sum = k_malloc(2*size*sizeof(uint32_t));
+    __ASSERT(buf_val != NULL, "Could not allocate buf_sum!");
+
     ring_buf_item_init(&stats->ring_val, size, buf_val);
     ring_buf_item_init(&stats->ring_sum, size, buf_sum);
 

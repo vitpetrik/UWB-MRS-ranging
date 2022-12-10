@@ -33,10 +33,11 @@ struct rx_details_t
 
 struct rx_queue_t
 {
-    uint8_t buffer_rx[128];
     uint8_t buf_offset;
     struct rx_details_t rx_details;
     struct mac_data_t mac_data;
+    uint16_t frame_length;
+    uint8_t *buffer_rx;
 }__attribute__((aligned(4)));
 
 struct tx_delay_t
@@ -55,10 +56,10 @@ struct tx_details_t
 
 struct tx_queue_t
 {
-    uint8_t frame_buffer[128];
-    uint16_t frame_length;
     struct tx_details_t tx_details;
     struct mac_data_t mac_data;
+    uint16_t frame_length;
+    uint8_t *frame_buffer;
 }__attribute__((aligned(4)));
 
 // DATA STRUCTURE DEFINITIONS
@@ -93,7 +94,7 @@ struct uwb_data_msg_t {
 
     uint8_t msg_type;
     uint8_t payload_size;
-    uint8_t payload[128];
+    uint8_t *payload;
 };
 
 enum {

@@ -66,21 +66,26 @@ void ranging_thread(void)
             printf("Unknown message type\n\r");
             break;
         }
+
+        k_free(data.buffer_rx);
     }
 }
 
 // PROCESS BEACON TYPE MESSAGE
 int rx_beacon(const uint16_t source_id, void *msg)
 {
+    int status;
     beacon_msg beacon;
 
     pb_istream_t stream = pb_istream_from_buffer((uint8_t *)msg, beacon_msg_size);
-    pb_decode(&stream, beacon_msg_fields, &beacon);
+    status = pb_decode(&stream, beacon_msg_fields, &beacon);
+
+    // __ASSERT(status == true, "Protocol buffer decode failed");
 
     if (not devices_map.contains(source_id))
     {
         struct device_t *dev_ptr = (struct device_t *)k_calloc(1, sizeof(struct device_t));
-        __ASSERT_NO_MSG(dev_ptr != NULL);
+        __ASSERT(dev_ptr != NULL, "Allocating device pointer Failed!");
 
         devices_map[source_id] = dev_ptr;
         devices_map[source_id]->ranging = {0, 0, 0, 0, 0, 0, 0};
@@ -106,6 +111,8 @@ float ToF_DS(float Ra, float Da, float Rb, float Db)
 
 int rx_ranging_ds(const uint16_t source_id, void *msg, struct rx_details_t *queue_data)
 {
+    int status;
+
     uint32_t *msg_uint32_t = (uint32_t *)msg;
     uint32_t buffer_tx[3];
 
@@ -118,7 +125,7 @@ int rx_ranging_ds(const uint16_t source_id, void *msg, struct rx_details_t *queu
     if (not devices_map.count(source_id))
     {
         struct device_t *dev_ptr = (struct device_t *)k_calloc(1, sizeof(struct device_t));
-        __ASSERT_NO_MSG(dev_ptr != NULL);
+        __ASSERT(dev_ptr != NULL, "Allocating device pointer Failed!");
 
         stats_init(&dev_ptr->ranging.stats, 20);
 
@@ -183,7 +190,10 @@ int rx_ranging_ds(const uint16_t source_id, void *msg, struct rx_details_t *queu
     uwb_msg.data.ranging_msg.range = stats_get_mean(stats);
     uwb_msg.data.ranging_msg.variance = stats_get_variance(stats);
 
-    k_msgq_put(&uwb_msgq, &uwb_msg, K_FOREVER);
+    printf("Ranging from ID 0x%X %.2f m | %.4f\n\r", source_id, stats_get_mean(stats), stats_get_variance(stats));
+
+    status = k_msgq_put(&uwb_msgq, &uwb_msg, K_FOREVER);
+    __ASSERT(status == 0, "Putting message to queue Failed!");
 
     return 0;
 }
@@ -192,6 +202,8 @@ int rx_ranging_ds(const uint16_t source_id, void *msg, struct rx_details_t *queu
 void uwb_beacon_thread(void)
 {
     printf("Starting beacon thread\n\r");
+
+    int status;
 
     // INIT MESSAGE
     beacon_msg beacon = {.uav_type = UAV_TYPE_DEFAULT,
@@ -208,7 +220,8 @@ void uwb_beacon_thread(void)
         uint8_t buffer_tx[beacon_msg_size];
 
         pb_ostream_t stream = pb_ostream_from_buffer(buffer_tx, beacon_msg_size);
-        pb_encode(&stream, beacon_msg_fields, &beacon);
+        status = pb_encode(&stream, beacon_msg_fields, &beacon);
+        __ASSERT(status == true, "Protocol buffeer encode failed");
 
         write_uwb(0xffff, DATA, BEACON_MSG, (const uint8_t *)buffer_tx, stream.bytes_written, &tx_details);
 
@@ -244,6 +257,8 @@ void uwb_ranging_thread(void)
                 .ranging = 1,
                 .tx_mode = DWT_START_TX_IMMEDIATE | DWT_RESPONSE_EXPECTED,
                 .tx_timestamp = &(device->ranging.tx_timestamp)};
+
+            printf("Requesting ranging to device 0x%X\n\r", device_id);
 
             write_uwb(device_id, MAC_COMMAND, RANGING_DS_MSG, (uint8_t *)empty, 3 * sizeof(uint32_t), &tx_details);
         }

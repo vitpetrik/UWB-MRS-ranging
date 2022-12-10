@@ -11,6 +11,7 @@
  */
 
 #include "deca_device_api.h"
+#include <zephyr/zephyr.h>
 // ---------------------------------------------------------------------------
 //
 // NB: The purpose of this file is to provide for microprocessor interrupt enable/disable, this is used for 
@@ -47,8 +48,11 @@
  *
  * returns the state of the DW1000 interrupt
  */
+
+unsigned int key;
 decaIrqStatus_t decamutexon(void)
 {
+	key = irq_lock();
 	return 0;
 }
 
@@ -69,5 +73,6 @@ decaIrqStatus_t decamutexon(void)
  */
 void decamutexoff(decaIrqStatus_t s)        // put a function here that re-enables the interrupt at the end of the critical section
 {
+	irq_unlock(key);
 	return;
 }

@@ -9,6 +9,8 @@
  * 
  */
 
+#include <zephyr/sys/__assert.h>
+
 #include "uwb_transport.h"
 #include "common_variables.h"
 
@@ -26,6 +28,9 @@ void write_uwb(const uint16_t destination_id, const frame_type_t frame_type, con
 {
     // ALLOCATE MEMORY FOR tx BUFFER AND QUEUE DATA
     struct tx_queue_t queue_data;
+    queue_data.frame_buffer = (uint8_t*) k_malloc(ENCODED_MAC_LENGTH+len);
+
+    __ASSERT(queue_data.frame_buffer != NULL, "Failed to allocate buffer");
 
     struct mac_data_t mac_data = {
         .frame_ctrl = 0x9840 | frame_type,
@@ -45,7 +50,11 @@ void write_uwb(const uint16_t destination_id, const frame_type_t frame_type, con
     queue_data.mac_data = mac_data;
 
     // SEND DATA TO TX QUEUE
-    k_msgq_put(&uwb_tx_msgq, &queue_data, K_FOREVER);
+    int status = k_msgq_put(&uwb_tx_msgq, &queue_data, K_MSEC(100));
+
+    __ASSERT(status >= 0, "Submitting to workqueue Failed!");
+
+    return;
 }
 
 

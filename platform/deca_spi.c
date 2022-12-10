@@ -13,6 +13,8 @@
 #include <string.h>
 
 #include <zephyr/zephyr.h>
+#include <zephyr/sys/__assert.h>
+
 #include <zephyr/device.h>
 #include <zephyr/devicetree.h>
 #include <zephyr/drivers/sensor.h>
@@ -68,9 +70,7 @@ int writetospi(uint16 headerLength, const uint8 *headerBuffer, uint32 bodylength
     struct spi_buf_set buff_rx = {.buffers = spi_buf_rx, .count = 2};
 
     int error = spi_transceive(spi, dwt_spi_cfg, &buff_tx, &buff_rx);
-
-    if (error < 0)
-        return -1;
+    __ASSERT(error == 0, "Error in SPI transmission");
 
     return 0;
 
@@ -103,9 +103,7 @@ int readfromspi(uint16 headerLength, const uint8 *headerBuffer, uint32 readlengt
     struct spi_buf_set buff_rx = {.buffers = spi_buf_rx, .count = 2};
 
     int error = spi_transceive(spi, dwt_spi_cfg, &buff_tx, &buff_rx);
-
-    if (error < 0)
-        return -1;
+    __ASSERT(error == 0, "Error in SPI transmission");
 
     return 0;
 } // end readfromspi()
