@@ -10,6 +10,7 @@
  */
 
 #include <zephyr/zephyr.h>
+#include <zephyr/sys/__assert.h>
 #include <zephyr/drivers/uart.h>
 #include <zephyr/console/tty.h>
 #include "uart.h"
@@ -35,10 +36,14 @@ uint8_t tx_buffer[1024];
  */
 void uart_setup()
 {
-    tty_init(&tty, uart_dev);
+    int status;
+    status = tty_init(&tty, uart_dev);
+    __ASSERT(status == 0, "initiating tty failed");
 
-    tty_set_rx_buf(&tty, (void*) rx_buffer, sizeof(rx_buffer));
+    status  = tty_set_rx_buf(&tty, (void*) rx_buffer, sizeof(rx_buffer));
+    __ASSERT(status == 0, "Wrong buffer");
     tty_set_tx_buf(&tty, (void*) tx_buffer, sizeof(tx_buffer));
+    __ASSERT(status == 0, "Wrong buffer");
 
     return;
 }
@@ -107,6 +112,10 @@ int read_baca(struct baca_protocol *msg)
     if (255 < msg->payload_size)
         return -1;
 
+    msg->payload = k_malloc(sizeof(uint8_t)*msg->payload_size);
+
+    __ASSERT(msg->payload != NULL, "Failed allocating buffer of size %d Bytes!", msg->payload_size);
+
     read_buffer(msg->payload, msg->payload_size);
 
     msg->cksum += calc_cksum(msg->payload, msg->payload_size);
@@ -114,7 +123,10 @@ int read_baca(struct baca_protocol *msg)
     uint8_t rx_cksum = read_char();
 
     if (rx_cksum != msg->cksum)
+    {
+        k_free(msg->payload);
         return -1;
+    }
 
     return msg->payload_size;
 }
@@ -126,7 +138,8 @@ int read_baca(struct baca_protocol *msg)
  */
 void write_char(uint8_t c)
 {
-    tty_write(&tty, (const void*) &c, 1);
+    int status = tty_write(&tty, (const void*) &c, 1);
+    __ASSERT(status >= 0, "TTY Write failed!");
 }
 
 /**
@@ -137,7 +150,8 @@ void write_char(uint8_t c)
  */
 void write_buffer(uint8_t *buffer, int len)
 {
-    tty_write(&tty, (const void*) buffer, len);
+    int status = tty_write(&tty, (const void*) buffer, len);
+    __ASSERT(status >= 0, "TTY Write failed!");
     return;
 }
 
@@ -150,7 +164,8 @@ uint8_t read_char()
 {
     uint8_t c;
 
-    tty_read(&tty, (void*) &c, 1);
+    int status = tty_read(&tty, (void*) &c, 1);
+    __ASSERT(status < 0, "TTY read failed!");
 
     return c;
 }
@@ -163,7 +178,8 @@ uint8_t read_char()
  */
 void read_buffer(uint8_t *buf, int len)
 {
-    tty_read(&tty, (void*) buf, len);
+    int status = tty_read(&tty, (void*) buf, len);
+    __ASSERT(status < 0, "TTY read failed!");
 
     return;
 }

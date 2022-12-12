@@ -9,7 +9,7 @@
  *
  */
 
-#include <zephyr/zephyr.h>
+#include <zephyr/kernel.h>
 #include <zephyr/sys/__assert.h>
 #include <zephyr/device.h>
 #include <zephyr/devicetree.h>
@@ -17,7 +17,6 @@
 #include <zephyr/drivers/uart.h>
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/drivers/spi.h>
-#include <timing/timing.h>
 #include <string.h>
 
 #include <stdio.h>
@@ -189,6 +188,9 @@ void ros_tx_thread(void)
 
     struct uwb_msg_t uwb_msg;
 
+    msg.payload = k_malloc(sizeof(struct ros_msg_t));
+    __ASSERT(msg.payload != NULL, "Failed to allocate buffer!");
+
     while (1)
     {
         int status = k_msgq_get(&uwb_msgq, (void *)&uwb_msg, K_FOREVER);
@@ -217,6 +219,8 @@ void ros_tx_thread(void)
         msg.payload_size = serialize_ros(&ros, msg.payload);
         write_baca(&msg);
     }
+
+    k_free(msg.payload);
 }
 
 /**
@@ -231,6 +235,8 @@ void ros_rx_thread(void)
     while (1)
     {
         int payload_length = read_baca(&msg);
+        if (payload_length < 0)
+            continue;
 
         deserialize_ros(&ros, &msg.payload);
 
@@ -243,5 +249,7 @@ void ros_rx_thread(void)
             msg.payload_size = serialize_ros(&ros, msg.payload);
             write_baca(&msg);
         }
+
+        k_free(msg.payload);
     }
 }

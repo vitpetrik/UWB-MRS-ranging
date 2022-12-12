@@ -109,6 +109,21 @@ float ToF_DS(float Ra, float Da, float Rb, float Db)
     return tof;
 }
 
+struct scheduled_ranging {
+    struct k_work_delayable work;
+    uint8_t buffer[3 * sizeof(uint32_t)];
+    uint16_t destination;
+    struct tx_details_t tx_details;
+};
+
+void submit_handler(struct k_work *item) {
+    struct scheduled_ranging *data = CONTAINER_OF(item, struct scheduled_ranging, work);
+    write_uwb(data->destination, MAC_COMMAND, RANGING_DS_MSG, (const uint8_t *) data->buffer, 3 * sizeof(uint32_t), &data->tx_details);
+
+    k_free(data);
+    return;
+}
+
 int rx_ranging_ds(const uint16_t source_id, void *msg, struct rx_details_t *queue_data)
 {
     int status;
@@ -163,9 +178,17 @@ int rx_ranging_ds(const uint16_t source_id, void *msg, struct rx_details_t *queu
     memcpy(&(buffer_tx[1]), &Rb, sizeof(uint32_t));
     memcpy(&(buffer_tx[2]), &Db, sizeof(uint32_t));
 
-    sleep_ms(4);
+    struct scheduled_ranging *work = (struct scheduled_ranging *) k_malloc(sizeof(struct scheduled_ranging));
+    __ASSERT(work != NULL, "Ouch! malloc failed :-(");
 
-    write_uwb(source_id, MAC_COMMAND, RANGING_DS_MSG, (const uint8_t *)buffer_tx, 3 * sizeof(uint32_t), &tx_details);
+    work->destination = source_id;
+    work->tx_details = tx_details;
+    memcpy(work->buffer, buffer_tx, 3 * sizeof(uint32_t));
+
+    k_work_init_delayable(&work->work, submit_handler);
+    status = k_work_schedule(&work->work, K_MSEC(10));
+    __ASSERT(status >= 0, "Error scheduling delayed work, status: %d", status);
+    // write_uwb(source_id, MAC_COMMAND, RANGING_DS_MSG, (const uint8_t *)buffer_tx, 3 * sizeof(uint32_t), &tx_details);
 
     if (Ra == 0 || Da == 0 || Rb == 0 || Db == 0)
         return 0;

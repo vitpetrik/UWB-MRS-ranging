@@ -42,6 +42,8 @@ K_CONDVAR_DEFINE(tx_condvar);
  */
 void uwb_tx(struct tx_queue_t *tx_queue)
 {
+    static int fail_counter = 0;
+
     // Get MAC data and Transmit details
     struct mac_data_t *mac_data = (struct mac_data_t *)&(tx_queue->mac_data);
     struct tx_details_t *tx_details = (struct tx_details_t *)&(tx_queue->tx_details);
@@ -86,10 +88,21 @@ void uwb_tx(struct tx_queue_t *tx_queue)
     if(status != 0)
     {
         printf("Getting condvar failed with status %d\n\r", status);
+        dwt_isr();
         dwt_forcetrxoff();
+        dwt_rxreset();
         dwt_rxenable(DWT_START_RX_IMMEDIATE);
+
+        fail_counter++;
+
         return;
     }
+    else 
+    {
+        fail_counter = 0;
+    }
+
+    __ASSERT(fail_counter < 2, "TX condvar is failing all the f*cking time!");
 
     // Save Tx timestamp if needed
     uint64_t *timestamp_ptr = tx_details->tx_timestamp;
@@ -176,6 +189,7 @@ void uwb_txdone(const dwt_cb_data_t *data)
  */
 void uwb_rxto(const dwt_cb_data_t *data)
 {
+    printf("RX timeout callback\n\r");
     dwt_rxenable(DWT_START_RX_IMMEDIATE);
     return;
 }
@@ -187,6 +201,7 @@ void uwb_rxto(const dwt_cb_data_t *data)
  */
 void uwb_rxerr(const dwt_cb_data_t *data)
 {
+    printf("RX error callback\n\r");
     dwt_rxenable(DWT_START_RX_IMMEDIATE);
     return;
 }
@@ -198,6 +213,7 @@ void uwb_rxerr(const dwt_cb_data_t *data)
  */
 void uwb_rxfrej(const dwt_cb_data_t *data)
 {
+    printf("RX frame rejection callback\n\r");
     dwt_rxenable(DWT_START_RX_IMMEDIATE | DWT_NO_SYNC_PTRS);
     return;
 }
@@ -209,11 +225,7 @@ void uwb_rxfrej(const dwt_cb_data_t *data)
  */
 void uwb_rxok(const dwt_cb_data_t *data)
 {
-    //! READ the integrator first - after rxenable the value gets overwritten
-    // int32_t integrator = dwt_readcarrierintegrator();
-    // dwt_rxenable(DWT_START_RX_IMMEDIATE | DWT_NO_SYNC_PTRS);
-
-    printf("RX callback\n\r");
+    printf("RX OK callback\n\r");
 
     // INIT DATA
     int status;

@@ -20,7 +20,7 @@ struct baca_protocol {
     uint8_t cksum;
 
     uint8_t payload_size;
-    uint8_t payload[255];
+    uint8_t *payload;
 };
 
 #pragma once
