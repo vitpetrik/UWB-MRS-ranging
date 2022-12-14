@@ -9,8 +9,10 @@
  *
  */
 
-#include <zephyr/zephyr.h>
+#include <zephyr/kernel.h>
 #include <zephyr/sys/__assert.h>
+#include <zephyr/logging/log.h>
+LOG_MODULE_REGISTER(uwb_threads);
 
 #include <stdio.h>
 
@@ -42,7 +44,7 @@ K_CONDVAR_DEFINE(tx_condvar);
  */
 void uwb_tx(struct tx_queue_t *tx_queue)
 {
-    static int fail_counter = 0;
+    static uint32_t reset_rx_time = 0;
 
     // Get MAC data and Transmit details
     struct mac_data_t *mac_data = (struct mac_data_t *)&(tx_queue->mac_data);
@@ -85,24 +87,14 @@ void uwb_tx(struct tx_queue_t *tx_queue)
 
     //! Workaround for issue described at DW1000 errata "TX-1"
     //! Don't you ever dare to delete this!
-    if(status != 0)
+    if(status != 0 || k_uptime_get_32() - reset_rx_time > 60000)
     {
-        printf("Getting condvar failed with status %d\n\r", status);
-        dwt_isr();
+        LOG_WRN("Resseting RX as an workaround");
         dwt_forcetrxoff();
         dwt_rxreset();
         dwt_rxenable(DWT_START_RX_IMMEDIATE);
-
-        fail_counter++;
-
-        return;
+        reset_rx_time = k_uptime_get_32();
     }
-    else 
-    {
-        fail_counter = 0;
-    }
-
-    __ASSERT(fail_counter < 2, "TX condvar is failing all the f*cking time!");
 
     // Save Tx timestamp if needed
     uint64_t *timestamp_ptr = tx_details->tx_timestamp;
@@ -121,7 +113,7 @@ void uwb_tx(struct tx_queue_t *tx_queue)
  */
 void uwb_tx_thread(void)
 {
-    printf("Tx thread started\n\r");
+    LOG_DBG("Tx thread started");
     int status = k_condvar_init(&tx_condvar);
 
     __ASSERT(status == 0, "Condvar initializtion didnt go through");
@@ -157,7 +149,7 @@ void uwb_tx_thread(void)
  */
 void dwt_isr_handler(struct k_work *item)
 {
-    printf("Working on dwt_isr routine\n\r");
+    LOG_DBG("Working on dwt_isr routine");
 
     int status = k_mutex_lock(&dwt_mutex, K_MSEC(100));
     __ASSERT(status == 0, "Mutex did not lock");
@@ -176,7 +168,7 @@ K_WORK_DEFINE(isr_work, dwt_isr_handler);
  */
 void uwb_txdone(const dwt_cb_data_t *data)
 {
-    printf("Issuing txdone condvar\n\r");
+    LOG_DBG("Issuing txdone condvar");
     int status = k_condvar_signal(&tx_condvar);
     __ASSERT(status == 0, "Did not signal to condvar!");
     return;
@@ -189,7 +181,7 @@ void uwb_txdone(const dwt_cb_data_t *data)
  */
 void uwb_rxto(const dwt_cb_data_t *data)
 {
-    printf("RX timeout callback\n\r");
+    LOG_DBG("RX timeout callback");
     dwt_rxenable(DWT_START_RX_IMMEDIATE);
     return;
 }
@@ -201,8 +193,15 @@ void uwb_rxto(const dwt_cb_data_t *data)
  */
 void uwb_rxerr(const dwt_cb_data_t *data)
 {
-    printf("RX error callback\n\r");
+    LOG_DBG("RX error callback");
     dwt_rxenable(DWT_START_RX_IMMEDIATE);
+
+    LOG_ERR("RX ERROR detected 0x%X", data->status);
+
+    if(data->status & SYS_STATUS_RXOVRR)
+    {
+        LOG_ERR("RXOVRR error happend!");
+    }
     return;
 }
 
@@ -213,7 +212,7 @@ void uwb_rxerr(const dwt_cb_data_t *data)
  */
 void uwb_rxfrej(const dwt_cb_data_t *data)
 {
-    printf("RX frame rejection callback\n\r");
+    LOG_DBG("RX frame rejection callback");
     dwt_rxenable(DWT_START_RX_IMMEDIATE | DWT_NO_SYNC_PTRS);
     return;
 }
@@ -225,7 +224,7 @@ void uwb_rxfrej(const dwt_cb_data_t *data)
  */
 void uwb_rxok(const dwt_cb_data_t *data)
 {
-    printf("RX OK callback\n\r");
+    LOG_DBG("RX OK callback");
 
     // INIT DATA
     int status;

@@ -11,6 +11,9 @@
 
 #include <zephyr/kernel.h>
 #include <zephyr/sys/__assert.h>
+#include <zephyr/logging/log.h>
+LOG_MODULE_REGISTER(main);
+
 #include <zephyr/device.h>
 #include <zephyr/devicetree.h>
 #include <zephyr/drivers/sensor.h>
@@ -92,27 +95,9 @@ K_THREAD_DEFINE(uwb_ranging_thr, 1024, uwb_ranging_thread, NULL, NULL, NULL, 5, 
 K_THREAD_DEFINE(ranging_thr, 1024, ranging_thread, NULL, NULL, NULL, -3, 0, 0);
 K_THREAD_DEFINE(uwb_tx_thr, 1024, uwb_tx_thread, NULL, NULL, NULL, -2, 0, 0);
 
-void main(void)
+void setup_dwt()
 {
-    // INITIALIZE
-    printf("%s\n\r", APP_NAME);
-    printf("%s\n\r", buildString);
-
-    uart_setup();
-
-    DEVICE_ID = NRF_FICR->DEVICEID[0] >> 16;
-    PAN_ID = 0xdeca;
-    SEQ_NUM = 0;
-
-    printf("Device ID: 0x%X\n\r", DEVICE_ID);
-
-    // Initiliaze LEDs GPIO
-    gpio_pin_configure_dt(&led0red, GPIO_OUTPUT_INACTIVE);
-    gpio_pin_configure_dt(&led1green, GPIO_OUTPUT_INACTIVE);
-    gpio_pin_configure_dt(&led2red, GPIO_OUTPUT_INACTIVE);
-    gpio_pin_configure_dt(&led3blue, GPIO_OUTPUT_INACTIVE);
-
-    // Get DWT Mutex
+// Get DWT Mutex
     k_mutex_init(&dwt_mutex);
     k_mutex_lock(&dwt_mutex, K_FOREVER);
 
@@ -154,14 +139,37 @@ void main(void)
 
     dwt_setcallbacks(uwb_txdone, uwb_rxok, uwb_rxto, uwb_rxerr, uwb_rxfrej);
 
-    dwt_setinterrupt(DWT_INT_TFRS | DWT_INT_RFCG, 1);
+    dwt_setinterrupt(DWT_INT_TFRS | DWT_INT_RFCG | DWT_INT_RXOVRR | DWT_INT_RFSL | DWT_INT_RFCE | DWT_INT_RPHE, 1);
     dwt_enable_interrupt();
 
     dwt_rxenable(DWT_START_RX_IMMEDIATE);
 
     k_mutex_unlock(&dwt_mutex);
 
-    printf("Settings done!\n\r");
+    LOG_INF("Settings done!");
+}
+
+void main(void)
+{
+    // INITIALIZE
+    LOG_INF("%s", APP_NAME);
+    LOG_INF("%s", buildString);
+
+    uart_setup();
+
+    DEVICE_ID = NRF_FICR->DEVICEID[0] >> 16;
+    PAN_ID = 0xdeca;
+    SEQ_NUM = 0;
+
+    LOG_INF("Device ID: 0x%X", DEVICE_ID);
+
+    // Initiliaze LEDs GPIO
+    gpio_pin_configure_dt(&led0red, GPIO_OUTPUT_INACTIVE);
+    gpio_pin_configure_dt(&led1green, GPIO_OUTPUT_INACTIVE);
+    gpio_pin_configure_dt(&led2red, GPIO_OUTPUT_INACTIVE);
+    gpio_pin_configure_dt(&led3blue, GPIO_OUTPUT_INACTIVE);
+
+    setup_dwt();
 
     //? Heart beat LED
     //? Good to recognize bad things happening.. SEG FAULT etc.

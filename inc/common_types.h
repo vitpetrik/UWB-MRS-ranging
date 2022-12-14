@@ -69,8 +69,9 @@ struct ranging_t
     uint64_t tx_timestamp;
     uint64_t rx_timestamp;
     uint32_t last_meas_time;
-
+    int error_counter;
     struct statistics_t stats;
+    uint8_t expected_packet_number;
 };
 
 struct device_t

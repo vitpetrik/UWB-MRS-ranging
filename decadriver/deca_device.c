@@ -2495,9 +2495,9 @@ void dwt_isr(void)
     }
 
     // Handle RX errors events
-    if (status & (SYS_STATUS_ALL_RX_ERR & ~SYS_STATUS_AFFREJ))
+    if (status & ((SYS_STATUS_ALL_RX_ERR | SYS_STATUS_RXOVRR) & ~SYS_STATUS_AFFREJ))
     {
-        dwt_write32bitreg(SYS_STATUS_ID, SYS_STATUS_ALL_RX_ERR); // Clear RX error event bits
+        dwt_write32bitreg(SYS_STATUS_ID, SYS_STATUS_ALL_RX_ERR | SYS_STATUS_RXOVRR); // Clear RX error event bits
 
         pdw1000local->wait4resp = 0;
 
