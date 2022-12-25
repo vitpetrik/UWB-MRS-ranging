@@ -83,7 +83,6 @@ int rx_beacon(const uint16_t source_id, void *msg)
     pb_istream_t stream = pb_istream_from_buffer((uint8_t *)msg, beacon_msg_size);
     status = pb_decode(&stream, beacon_msg_fields, &beacon);
 
-    // __ASSERT(status == true, "Protocol buffer decode failed");
 
     if (not devices_map.contains(source_id))
     {
@@ -93,6 +92,7 @@ int rx_beacon(const uint16_t source_id, void *msg)
         devices_map[source_id] = dev_ptr;
         devices_map[source_id]->ranging = {0, 0, 0, 0, 0, 0, 0, 0};
         devices_map[source_id]->ranging.expected_packet_number = 0;
+        devices_map[source_id]->ranging.role = INITIATOR;
 
         stats_init(&dev_ptr->ranging.stats, 20);
     }
@@ -102,6 +102,8 @@ int rx_beacon(const uint16_t source_id, void *msg)
     device->uav_type = beacon.uav_type;
     device->GPS[0] = beacon.GPS[0];
     device->GPS[1] = beacon.GPS[1];
+
+    LOG_INF("Received beacon frame from 0x%X", device->id);
 
     return 0;
 }
@@ -124,7 +126,7 @@ struct scheduled_ranging
 void submit_handler(struct k_work *item)
 {
     struct scheduled_ranging *data = CONTAINER_OF(item, struct scheduled_ranging, work);
-    write_uwb(data->destination, MAC_COMMAND, RANGING_DS_MSG, (const uint8_t *)data->buffer,  sizeof(data->buffer), &data->tx_details);
+    write_uwb(data->destination, MAC_COMMAND, RANGING_DS_MSG, (const uint8_t *)data->buffer, sizeof(data->buffer), &data->tx_details);
 
     k_free(data);
     return;
@@ -165,6 +167,7 @@ int rx_ranging_ds(const uint16_t source_id, void *msg, struct rx_details_t *queu
 
     if (packet_number == 0)
     {
+        device->ranging.role = RESPONDER;
         LOG_INF("New ranging instance!, packet number = %d", packet_number);
     }
     else if (packet_number == device->ranging.expected_packet_number)
@@ -177,11 +180,15 @@ int rx_ranging_ds(const uint16_t source_id, void *msg, struct rx_details_t *queu
         return 0;
     }
 
-    packet_number = (packet_number + 1) / 256 + (packet_number + 1) % 256;
-    device->ranging.expected_packet_number = (packet_number + 1) / 256 + (packet_number + 1) % 256;
-    LOG_INF("New expected number: %u, current packet number: %u", device->ranging.expected_packet_number, packet_number);
+    device->ranging.role = packet_number % 2 ? INITIATOR : RESPONDER;
+
+    device->ranging.expected_packet_number = (packet_number + 2) / 255 + (packet_number + 2) % 255;
+    LOG_INF("Current packet number: %u, New expected number: %u", packet_number, device->ranging.expected_packet_number);
+
+    packet_number = (packet_number + 1) / 255 + (packet_number + 1) % 255;
 
     device->ranging.last_meas_time = k_uptime_get_32();
+    device->ranging.error_counter = 0;
 
     if (Rb == 0 && Ra == 0 && Da == 0)
     {
@@ -222,7 +229,7 @@ int rx_ranging_ds(const uint16_t source_id, void *msg, struct rx_details_t *queu
     work->tx_details = tx_details;
 
     k_work_init_delayable(&work->work, submit_handler);
-    status = k_work_schedule(&work->work, K_MSEC(10));
+    status = k_work_schedule(&work->work, K_MSEC(10*devices_map.size()));
     __ASSERT(status >= 0, "Error scheduling delayed work, status: %d", status);
 
     if (Ra == 0 || Da == 0 || Rb == 0 || Db == 0)
@@ -246,7 +253,7 @@ int rx_ranging_ds(const uint16_t source_id, void *msg, struct rx_details_t *queu
     uwb_msg.data.ranging_msg.range = stats_get_mean(stats);
     uwb_msg.data.ranging_msg.variance = stats_get_variance(stats);
 
-    LOG_INF("Ranging from ID 0x%X %.2f m | %.4f", source_id, stats_get_mean(stats), stats_get_variance(stats));
+    LOG_INF("Ranging from ID 0x%X %.2f m | %.4f dev", source_id, stats_get_mean(stats), stats_get_variance(stats));
 
     status = k_msgq_put(&uwb_msgq, &uwb_msg, K_FOREVER);
     __ASSERT(status == 0, "Putting message to queue Failed!");
@@ -297,20 +304,19 @@ void uwb_ranging_thread(void)
             uint32_t device_id = node.first;
             struct device_t *device = (struct device_t *)node.second;
 
-            uint32_t rand = sys_rand32_get();
-
             if ((k_uptime_get_32() - device->ranging.last_meas_time) < 100)
-            {
-                device->ranging.error_counter = 0;
                 continue;
-            }
+
+            device->ranging.error_counter++;
+
+            __ASSERT(device->ranging.error_counter < 100, "Could not find the device");
+
+            if (device->ranging.role == RESPONDER)
+                continue;
 
             device->ranging.last_meas_time = k_uptime_get_32();
             device->ranging.tx_timestamp = 0;
-            device->ranging.error_counter++;
             device->ranging.expected_packet_number = 1;
-
-            __ASSERT(device->ranging.error_counter < 10, "Could not find the device");
 
             stats_reset(&device->ranging.stats);
 
@@ -325,7 +331,7 @@ void uwb_ranging_thread(void)
 
             write_uwb(device_id, MAC_COMMAND, RANGING_DS_MSG, (uint8_t *)empty, 1 * sizeof(uint8_t) + 3 * sizeof(uint32_t), &tx_details);
         }
-        sleep_ms(100 + 20 * (sys_rand32_get() / INT_MAX - 1));
+        sleep_ms(100);
     }
 }
 
@@ -333,8 +339,6 @@ void uwb_ranging_thread(void)
 void uwb_ranging_print_thread(void)
 {
     LOG_INF("Ranging print thread started");
-
-    return;
 
     while (devices_map.empty())
         sleep_ms(100);

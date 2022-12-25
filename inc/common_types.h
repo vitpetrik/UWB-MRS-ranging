@@ -62,6 +62,12 @@ struct tx_queue_t
     uint8_t *frame_buffer;
 }__attribute__((aligned(4)));
 
+typedef enum
+{
+    INITIATOR,
+    RESPONDER
+} participant_t;
+
 // DATA STRUCTURE DEFINITIONS
 struct ranging_t
 {
@@ -72,6 +78,7 @@ struct ranging_t
     int error_counter;
     struct statistics_t stats;
     uint8_t expected_packet_number;
+    participant_t role;
 };
 
 struct device_t
