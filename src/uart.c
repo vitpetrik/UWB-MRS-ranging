@@ -165,7 +165,7 @@ uint8_t read_char()
     uint8_t c;
 
     int status = tty_read(&tty, (void*) &c, 1);
-    __ASSERT(status < 0, "TTY read failed!");
+    __ASSERT(status >= 0, "TTY read failed!");
 
     return c;
 }
@@ -179,7 +179,7 @@ uint8_t read_char()
 void read_buffer(uint8_t *buf, int len)
 {
     int status = tty_read(&tty, (void*) buf, len);
-    __ASSERT(status < 0, "TTY read failed!");
+    __ASSERT(status >= 0, "TTY read failed!");
 
     return;
 }

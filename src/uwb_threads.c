@@ -50,6 +50,9 @@ void uwb_tx(struct tx_queue_t *tx_queue)
     struct mac_data_t *mac_data = (struct mac_data_t *)&(tx_queue->mac_data);
     struct tx_details_t *tx_details = (struct tx_details_t *)&(tx_queue->tx_details);
 
+    // Serialize MAC
+    int mac_length = encode_MAC(mac_data, tx_queue->frame_buffer);
+
     // SET DELAYED TX TIMESTAMP
     if (tx_queue->tx_details.tx_mode & DWT_START_TX_DELAYED)
     {
@@ -66,11 +69,10 @@ void uwb_tx(struct tx_queue_t *tx_queue)
 
         // set the final tx data to the UWB and to MAC data
         dwt_setdelayedtrxtime((uint32_t)(tx_timestamp >> 8));
-        mac_data->tx_delay = delay;
-    }
 
-    // Serialize MAC
-    int mac_length = encode_MAC(mac_data, tx_queue->frame_buffer);
+        memcpy(&tx_queue->frame_buffer[mac_length+tx_details->tx_delay.offset], &delay, sizeof(delay));
+        LOG_DBG("Setting delay to %d", delay);
+    }
 
     // WRITE DATA TO TX BUFFER
     dwt_writetxdata(mac_length + tx_queue->frame_length + 2, tx_queue->frame_buffer, 0);
@@ -113,6 +115,9 @@ void uwb_tx(struct tx_queue_t *tx_queue)
  */
 void uwb_tx_thread(void)
 {
+    k_tid_t thread = k_current_get();
+    k_thread_suspend(thread);
+
     LOG_DBG("Tx thread started");
     int status = k_condvar_init(&tx_condvar);
 

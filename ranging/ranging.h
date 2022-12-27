@@ -34,11 +34,25 @@ enum
     UAV_TYPE_DEFAULT = 0
 };
 
+#define ENCODED_RANGING_PKT_LENGTH 13
+
+struct ranging_pkt_t {
+    uint8_t packet_number;
+    uint32_t RoundA;
+    uint32_t DelayA;
+    uint32_t RoundB;
+    uint32_t DelayB;
+};
+
 #pragma once
 #ifdef __cplusplus
 extern "C"
 {
 #endif
+
+    int decode_ranging_pkt(struct ranging_pkt_t *ranging_pkt, const uint8_t *buffer_rx);
+
+    int encode_ranging_pkt(const struct ranging_pkt_t *ranging_pkt, uint8_t *buffer_tx);
 
     /**
      * @brief Receiving thread, waits for queue

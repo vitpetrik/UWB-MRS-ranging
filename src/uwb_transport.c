@@ -39,7 +39,6 @@ void write_uwb(const uint16_t destination_id, const frame_type_t frame_type, con
         .destination_id = destination_id,
         .source_id = DEVICE_ID,
         .msg_type = msg_type,
-        .tx_delay = 0,
     };
 
     memcpy(&queue_data.frame_buffer[ENCODED_MAC_LENGTH], msg, len);

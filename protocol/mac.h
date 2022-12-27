@@ -9,7 +9,7 @@ extern "C"
 {
 #endif
 
-#define ENCODED_MAC_LENGTH 14
+#define ENCODED_MAC_LENGTH 10
 
 struct mac_data_t {
     uint16_t frame_ctrl;
@@ -18,7 +18,6 @@ struct mac_data_t {
     uint16_t destination_id;
     uint16_t source_id;
     uint8_t msg_type;
-    uint32_t tx_delay;
 };
 
 int decode_MAC(struct mac_data_t *mac_data, const uint8_t *buffer_rx);

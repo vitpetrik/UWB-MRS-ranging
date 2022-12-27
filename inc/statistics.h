@@ -43,7 +43,6 @@ void stats_init(struct statistics_t *stats, int size);
  */
 void stats_update(struct statistics_t *stats, const float val);
 
-
 /**
  * @brief Reset struct to default statw
  * 

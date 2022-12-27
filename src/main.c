@@ -11,6 +11,7 @@
 
 #include <zephyr/kernel.h>
 #include <zephyr/sys/__assert.h>
+#include <zephyr/sys/reboot.h>
 #include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(main);
 
@@ -21,6 +22,7 @@ LOG_MODULE_REGISTER(main);
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/drivers/spi.h>
 #include <string.h>
+#include <stdbool.h>
 
 #include <stdio.h>
 
@@ -44,6 +46,8 @@ const char *buildString = "Build was compiled at " __DATE__ ", " __TIME__ ".";
 uint16_t DEVICE_ID;
 uint16_t PAN_ID;
 uint8_t SEQ_NUM;
+
+struct mrs_ranging_t mrs_ranging;
 
 // UART
 
@@ -89,8 +93,6 @@ K_THREAD_DEFINE(ros_tx_thr, 1024, ros_tx_thread, NULL, NULL, NULL, 6, 0, 0);
 
 K_THREAD_DEFINE(uwb_beacon_thr, 1024, uwb_beacon_thread, NULL, NULL, NULL, 5, 0, 0);
 K_THREAD_DEFINE(uwb_ranging_thr, 1024, uwb_ranging_thread, NULL, NULL, NULL, 5, 0, 0);
-
-// K_THREAD_DEFINE(uwb_ranging_print_thr, 1024, uwb_ranging_print_thread, NULL, NULL, NULL, 7, 0, 0);
 
 K_THREAD_DEFINE(ranging_thr, 1024, ranging_thread, NULL, NULL, NULL, -3, 0, 0);
 K_THREAD_DEFINE(uwb_tx_thr, 1024, uwb_tx_thread, NULL, NULL, NULL, -2, 0, 0);
@@ -155,21 +157,74 @@ void main(void)
     LOG_INF("%s", APP_NAME);
     LOG_INF("%s", buildString);
 
-    uart_setup();
-
-    DEVICE_ID = NRF_FICR->DEVICEID[0] >> 16;
-    PAN_ID = 0xdeca;
-    SEQ_NUM = 0;
-
-    LOG_INF("Device ID: 0x%X", DEVICE_ID);
-
     // Initiliaze LEDs GPIO
     gpio_pin_configure_dt(&led0red, GPIO_OUTPUT_INACTIVE);
     gpio_pin_configure_dt(&led1green, GPIO_OUTPUT_INACTIVE);
     gpio_pin_configure_dt(&led2red, GPIO_OUTPUT_INACTIVE);
     gpio_pin_configure_dt(&led3blue, GPIO_OUTPUT_INACTIVE);
 
+    uart_setup();
+
+    mrs_ranging.control == UNDETERMINED;
+    mrs_ranging.dwt_config = config;
+
+    struct baca_protocol msg;
+    struct ros_msg_t ros;
+
+    ros.address = RESET;
+    ros.mode = 'w';
+    ros.data.reset = 0xff;
+
+    msg.payload = k_malloc(sizeof(struct ros_msg_t));
+    __ASSERT(msg.payload != NULL, "Failed to allocate buffer!");
+
+    msg.payload_size = serialize_ros(&ros, msg.payload);
+
+    for(int i = 0; i < 26; i++)
+    {
+        if(mrs_ranging.control != UNDETERMINED)
+            break;
+
+        gpio_pin_toggle_dt(&led3blue);
+        write_baca(&msg);
+
+        sleep_ms(400);
+    }
+    k_free(msg.payload);
+
+    gpio_pin_set_dt(&led3blue, 0);
+
+    if(mrs_ranging.control == UNDETERMINED)
+        mrs_ranging.control = STANDALONE;
+
+    LOG_INF("Selected mode: %s", mrs_ranging.control == ROS ? "ROS" : "STANDALONE");
+
+    mrs_ranging.L2_address = NRF_FICR->DEVICEID[0] >> 16;
+    mrs_ranging.PAN_ID = 0xabcd;
+
+    DEVICE_ID = NRF_FICR->DEVICEID[0] >> 16;
+    PAN_ID = 0xabcd;
+    SEQ_NUM = 0;
+
     setup_dwt();
+
+    if(mrs_ranging.control == STANDALONE)
+    {
+        k_thread_abort(uwb_ranging_thr);
+        k_thread_abort(ros_tx_thr);
+    }
+    else 
+    {
+        k_thread_resume(uwb_ranging_thr);
+        k_thread_resume(ros_tx_thr);
+        k_thread_resume(ros_rx_thr);
+    }
+
+    k_thread_resume(uwb_beacon_thr);
+    k_thread_resume(ranging_thr);
+    k_thread_resume(uwb_tx_thr);
+
+    LOG_INF("Device ID: 0x%X", DEVICE_ID);
 
     //? Heart beat LED
     //? Good to recognize bad things happening.. SEG FAULT etc.
@@ -202,6 +257,7 @@ void ros_tx_thread(void)
     while (1)
     {
         int status = k_msgq_get(&uwb_msgq, (void *)&uwb_msg, K_FOREVER);
+        gpio_pin_set_dt(&led2red, 1);
 
         if (status != 0)
             continue;
@@ -226,6 +282,8 @@ void ros_tx_thread(void)
 
         msg.payload_size = serialize_ros(&ros, msg.payload);
         write_baca(&msg);
+
+        gpio_pin_set_dt(&led2red, 0);
     }
 
     k_free(msg.payload);
@@ -237,27 +295,58 @@ void ros_tx_thread(void)
  */
 void ros_rx_thread(void)
 {
-    struct baca_protocol msg;
+    struct baca_protocol msg_rx;
+    struct baca_protocol msg_tx;
     struct ros_msg_t ros;
+
+    msg_tx.payload = k_malloc(sizeof(struct ros_msg_t));
+    bool request_send;
 
     while (1)
     {
-        int payload_length = read_baca(&msg);
+        int payload_length = read_baca(&msg_rx);
         if (payload_length < 0)
             continue;
 
-        deserialize_ros(&ros, &msg.payload);
+        LOG_HEXDUMP_DBG(msg_rx.payload, payload_length, "Received buffer from ROS");
 
-        if (ros.address == WHO_I_AM && ros.mode == 'r')
+        gpio_pin_set_dt(&led3blue, 1);
+        deserialize_ros(&ros, msg_rx.payload);
+
+        k_free(msg_rx.payload);
+
+        LOG_DBG("Ros command at address: 0x%X", ros.address);
+        request_send = false;
+
+        switch (ros.address)
         {
+        case WHO_I_AM:
+            LOG_DBG("Received WHO_I_AM request");
             ros.mode = 'a';
-
-            memcpy(&ros.data.id_msg.id, APP_NAME, sizeof(APP_NAME));
-
-            msg.payload_size = serialize_ros(&ros, msg.payload);
-            write_baca(&msg);
+            memcpy(ros.data.id_msg.id, APP_NAME, sizeof(APP_NAME));
+            request_send = true;
+            break;
+        case RESET:
+            LOG_INF("Rebooting system on request from ROS");
+            sleep_ms(10);
+            sys_reboot(0);
+            break;
+        case ROS_CONTROL:
+            if(mrs_ranging.control == UNDETERMINED)
+                mrs_ranging.control = ros.data.control;
+            break;
+        default:
+            break;
         }
 
-        k_free(msg.payload);
+        gpio_pin_set_dt(&led3blue, 0);
+
+        if(!request_send)
+            continue;
+
+        msg_tx.payload_size = serialize_ros(&ros, msg_tx.payload);
+        write_baca(&msg_tx);
+
+        LOG_HEXDUMP_DBG(msg_tx.payload, msg_tx.payload_size, "Tx to ROS");
     }
 }

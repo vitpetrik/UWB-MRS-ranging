@@ -16,6 +16,8 @@
 #include <zephyr/device.h>
 #include "common_types.h"
 
+extern struct mrs_ranging_t mrs_ranging;
+
 extern uint16_t DEVICE_ID;
 extern uint16_t PAN_ID;
 extern uint8_t SEQ_NUM;

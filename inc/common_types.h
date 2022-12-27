@@ -11,6 +11,22 @@
 #include "mac.h"
 #include "statistics.h"
 
+#define PACKED __attribute__((__packed__))
+
+typedef enum {
+    UNDETERMINED,
+    STANDALONE,
+    ROS
+} control_t;
+
+struct mrs_ranging_t {
+    control_t control;
+    dwt_config_t dwt_config;
+
+    uint16_t L2_address;
+    uint16_t PAN_ID;
+};
+
 typedef enum
 {
     BEACON = 0,
@@ -44,6 +60,7 @@ struct tx_delay_t
 {
     uint64_t rx_timestamp;
     uint32_t reserved_time;
+    int offset;
 };
 
 struct tx_details_t
@@ -62,32 +79,7 @@ struct tx_queue_t
     uint8_t *frame_buffer;
 }__attribute__((aligned(4)));
 
-typedef enum
-{
-    INITIATOR,
-    RESPONDER
-} participant_t;
-
 // DATA STRUCTURE DEFINITIONS
-struct ranging_t
-{
-    uint8_t new_data;
-    uint64_t tx_timestamp;
-    uint64_t rx_timestamp;
-    uint32_t last_meas_time;
-    int error_counter;
-    struct statistics_t stats;
-    uint8_t expected_packet_number;
-    participant_t role;
-};
-
-struct device_t
-{
-    uint16_t id;
-    uint8_t uav_type;
-    double GPS[2];
-    struct ranging_t ranging;
-};
 
 struct ranging_msg_t {
     uint16_t source_mac;

@@ -24,6 +24,7 @@ target_sources(app PRIVATE
     decadriver/deca_params_init.c
     protocol/data_msg.pb.c
     ranging/ranging.cpp
+    ranging/node.c
     protocol/mac.c
     tty/tty.c
     # baca/baca.c

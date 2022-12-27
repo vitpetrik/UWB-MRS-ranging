@@ -59,6 +59,14 @@ int serialize_ros(const struct ros_msg_t *msg, uint8_t *buf)
         memcpy(&buf[index], msg->data.uwb_data_msg.payload, sizeof(msg->data.uwb_data_msg.payload));
         index += sizeof(msg->data.uwb_data_msg.payload);
         break;
+    case RESET:
+        memcpy(&buf[index], &msg->data.reset, sizeof(msg->data.reset));
+        index += sizeof(msg->data.reset);
+        break;
+    case ROS_CONTROL:
+        memcpy(&buf[index], &msg->data.control, sizeof(msg->data.control));
+        index += sizeof(msg->data.control);
+        break;
     default:
         break;
     }
@@ -113,6 +121,14 @@ void deserialize_ros(struct ros_msg_t *msg, const uint8_t *buf)
         index += sizeof(msg->data.uwb_data_msg.payload_size);
         memcpy(msg->data.uwb_data_msg.payload, &buf[index], sizeof(msg->data.uwb_data_msg.payload));
         index += sizeof(msg->data.uwb_data_msg.payload);
+        break;
+    case RESET:
+        memcpy(&msg->data.reset, &buf[index], sizeof(msg->data.reset));
+        index += sizeof(msg->data.reset);
+        break;
+    case ROS_CONTROL:
+        memcpy(&msg->data.control, &buf[index], sizeof(msg->data.control));
+        index += sizeof(msg->data.control);
         break;
     default:
         break;

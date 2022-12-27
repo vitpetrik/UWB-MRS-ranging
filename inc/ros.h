@@ -16,15 +16,16 @@
 
 #include "common_types.h"
 
-enum
+typedef enum
 {
     WHO_I_AM,
     RADIO_CONFIG,
     RANGING_MODE,
     RANGING_RESULT,
-    TRX_DATA
-};
-
+    TRX_DATA,
+    RESET,
+    ROS_CONTROL
+} address_t;
 
 struct ros_id_msg_t {
     char id[16];
@@ -36,8 +37,8 @@ struct ros_ranging_mode_msg_t {};
 
 struct ros_msg_t
 {
-    uint8_t address;
-    uint8_t mode;
+    address_t address;
+    char mode;
     union
     {
         struct ros_id_msg_t id_msg;
@@ -45,6 +46,8 @@ struct ros_msg_t
         struct ros_ranging_mode_msg_t ranging_mode_msg;
         struct ranging_msg_t ranging_msg;
         struct uwb_data_msg_t uwb_data_msg;
+        uint8_t reset;
+        control_t control;
 
     } data;
 };
