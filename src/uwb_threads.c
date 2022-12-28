@@ -252,7 +252,12 @@ void uwb_rxok(const dwt_cb_data_t *data)
     queue.rx_details = rx_details;
 
     // INIT QUEUE DATA AND SEND TO RX THREAD THROUGH QUEUE
-    queue.buf_offset = decode_MAC(&queue.mac_data, queue.buffer_rx);
+    int mac_length = decode_MAC(&queue.mac_data, queue.buffer_rx);
+    queue.buf_offset = mac_length;
+    // remove MAC
+    queue.frame_length -= mac_length;
+    // remove CRC
+    queue.frame_length -= 2;
 
     status = k_msgq_put(&uwb_rx_msgq, &queue, K_FOREVER);
     __ASSERT(status == 0, "Putting message to queue Fail!");

@@ -22,7 +22,6 @@ target_sources(app PRIVATE
     platform/platform.c
     decadriver/deca_device.c
     decadriver/deca_params_init.c
-    protocol/data_msg.pb.c
     ranging/ranging.cpp
     ranging/node.c
     protocol/mac.c

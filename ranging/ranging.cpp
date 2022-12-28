@@ -10,9 +10,6 @@ LOG_MODULE_REGISTER(ranging);
 
 #include <zephyr/random/rand32.h>
 
-#include <pb_encode.h>
-#include <pb_decode.h>
-
 #include "uwb_transport.h"
 #include "common_macro.h"
 #include "common_variables.h"
@@ -62,75 +59,43 @@ int encode_ranging_pkt(const struct ranging_pkt_t *ranging_pkt, uint8_t *buffer_
     return ENCODED_RANGING_PKT_LENGTH;
 }
 
-/**
- * @brief Receiving thread, waits for queue
- *
- */
-void ranging_thread(void)
+void request_ranging(uint16_t target_id, int preprocessing)
 {
-    k_tid_t thread = k_current_get();
-    k_thread_suspend(thread);
+    LOG_INF("Requesting ranging for 0x%X and window size %d", target_id, preprocessing);
 
-    LOG_INF("Rx thread started");
-    struct rx_queue_t data;
-
-    while (1)
-    {
-        // wait for data
-        read_uwb(&data);
-
-        int source_id = data.mac_data.source_id;
-        struct rx_details_t *rx_details = &data.rx_details;
-
-        void *offseted_buf = &data.buffer_rx[data.buf_offset];
-
-        int status = SUCCESS;
-        switch (data.mac_data.msg_type)
-        {
-        case BEACON_MSG:
-            status = rx_beacon(source_id, offseted_buf);
-            break;
-        case RANGING_INIT_MSG:
-        case RANGING_RESPONSE_MSG:
-            // No longer implemented
-            break;
-        case RANGING_DS_MSG:
-            status = rx_ranging_ds(source_id, offseted_buf, rx_details);
-            break;
-        default:
-            LOG_WRN("Unknown message type");
-            break;
-        }
-
-        k_free(data.buffer_rx);
-    }
-}
-
-// PROCESS BEACON TYPE MESSAGE
-int rx_beacon(const uint16_t source_id, void *msg)
-{
-    int status;
-    beacon_msg beacon;
-
-    pb_istream_t stream = pb_istream_from_buffer((uint8_t *)msg, beacon_msg_size);
-    status = pb_decode(&stream, beacon_msg_fields, &beacon);
-
-    if (not devices_map.contains(source_id))
+    if (not devices_map.contains(target_id))
     {
         struct node_t *node = (struct node_t *)k_calloc(1, sizeof(struct node_t));
         __ASSERT(node != NULL, "Allocating device pointer Failed!");
 
-        node_init(node, source_id);
+        node_init(node, target_id, preprocessing);
 
-        devices_map[source_id] = node;
+        devices_map[target_id] = node;
     }
-    struct node_t *node = devices_map[source_id];
+    struct node_t *node = devices_map[target_id];
 
-    node->id = source_id;
+    if(!stats_is_initialized(&node->ranging.stats))
+        stats_init(&node->ranging.stats, preprocessing);
 
-    LOG_INF("Received beacon frame from 0x%X", node->id);
+    if(preprocessing != stats_get_window_size(&node->ranging.stats))
+    {
+        stats_destroy(&node->ranging.stats);
+        stats_init(&node->ranging.stats, preprocessing);
+    }
 
-    return 0;
+    node->ranging.ranging_state = ENABLED;
+    return;
+}
+
+void disable_ranging(uint16_t target_id)
+{
+    if (not devices_map.contains(target_id))
+        return;
+
+    struct node_t *node = devices_map[target_id];
+
+    node->ranging.ranging_state = DISABLED;
+    return;
 }
 
 float ToF_DS(ranging_pkt_t *data)
@@ -179,11 +144,14 @@ int rx_ranging_ds(const uint16_t source_id, void *msg, struct rx_details_t *queu
         struct node_t *node = (struct node_t *)k_calloc(1, sizeof(struct node_t));
         __ASSERT(node != NULL, "Allocating device pointer Failed!");
 
-        node_init(node, source_id);
-
+        node_init(node, source_id, 0);
+        node->ranging.ranging_state = ENABLED;
         devices_map[source_id] = node;
     }
     struct node_t *node = devices_map[source_id];
+
+    if(node->ranging.ranging_state == DISABLED)
+        return 0;
 
     if (ranging_pkt.packet_number == 0)
     {
@@ -245,6 +213,9 @@ int rx_ranging_ds(const uint16_t source_id, void *msg, struct rx_details_t *queu
     status = k_work_schedule(&work->work, K_MSEC(10 * devices_map.size()));
     __ASSERT(status >= 0, "Error scheduling delayed work, status: %d", status);
 
+    if(!stats_is_initialized(&node->ranging.stats))
+        return 0;
+
     if (ranging_pkt.RoundA == 0 || ranging_pkt.DelayA == 0 || ranging_pkt.RoundB == 0 || ranging_pkt.DelayB == 0)
         return 0;
 
@@ -270,44 +241,13 @@ int rx_ranging_ds(const uint16_t source_id, void *msg, struct rx_details_t *queu
 
     LOG_INF("Ranging from ID 0x%X %.2f m | %.4f dev TOF: %.2f ns", source_id, stats_get_mean(stats), stats_get_variance(stats), tof*1e9);
 
+    if(mrs_ranging.control == STANDALONE)
+        return 0;
+
     status = k_msgq_put(&uwb_msgq, &uwb_msg, K_FOREVER);
     __ASSERT(status == 0, "Putting message to queue Failed!");
 
     return 0;
-}
-
-// BEACON THREAD
-void uwb_beacon_thread(void)
-{
-    k_tid_t thread = k_current_get();
-    k_thread_suspend(thread);
-
-    LOG_INF("Starting beacon thread");
-
-    int status;
-
-    // INIT MESSAGE
-    beacon_msg beacon = {.uav_type = UAV_TYPE_DEFAULT,
-                         .GPS = {50.4995652542, 13.4499037391}};
-
-    while (1)
-    {
-        // ALLOCATE MEMORY FOR BUFFER AND QUEUE DATA
-        struct tx_details_t tx_details = {
-            .ranging = 0,
-            .tx_mode = DWT_START_TX_IMMEDIATE | DWT_RESPONSE_EXPECTED,
-            .tx_timestamp = NULL};
-
-        uint8_t buffer_tx[beacon_msg_size];
-
-        pb_ostream_t stream = pb_ostream_from_buffer(buffer_tx, beacon_msg_size);
-        status = pb_encode(&stream, beacon_msg_fields, &beacon);
-        __ASSERT(status == true, "Protocol buffeer encode failed");
-
-        write_uwb(0xffff, DATA, BEACON_MSG, (const uint8_t *)buffer_tx, stream.bytes_written, &tx_details);
-
-        sleep_ms(1000);
-    }
 }
 
 // RANGING THREAD
@@ -327,7 +267,7 @@ void uwb_ranging_thread(void)
             uint32_t device_id = node_ptr.first;
             struct node_t *node = (struct node_t *)node_ptr.second;
 
-            if ((k_uptime_get_32() - node->ranging.last_meas_time) < 100)
+            if (node->ranging.ranging_state == DISABLED || (k_uptime_get_32() - node->ranging.last_meas_time) < 100)
                 continue;
 
             node->ranging.error_counter++;

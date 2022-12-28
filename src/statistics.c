@@ -23,21 +23,38 @@
  */
 void stats_init(struct statistics_t *stats, int size)
 {
+    if(size < 1)
+        size = 1;
+
     stats->mean = 0;
     stats->raw = 0;
     stats->sum2 = 0;
     stats->step = 0;
+    stats->window_size = size;
 
-    uint32_t *buf_val = k_malloc(2*size*sizeof(uint32_t));
+    stats->init = 1;
+
+    uint32_t *buf_val = k_malloc(2*stats->window_size*sizeof(uint32_t));
     __ASSERT(buf_val != NULL, "Could not allocate buf_val!");
 
-    uint32_t *buf_sum = k_malloc(2*size*sizeof(uint32_t));
+    uint32_t *buf_sum = k_malloc(2*stats->window_size*sizeof(uint32_t));
     __ASSERT(buf_val != NULL, "Could not allocate buf_sum!");
 
-    ring_buf_item_init(&stats->ring_val, size, buf_val);
-    ring_buf_item_init(&stats->ring_sum, size, buf_sum);
+    ring_buf_item_init(&stats->ring_val, stats->window_size, buf_val);
+    ring_buf_item_init(&stats->ring_sum, stats->window_size, buf_sum);
 
     return;
+}
+
+/**
+ * @brief Checks whether the stats is initialized
+ * 
+ * @param stats pointer to statistics_t
+ * @return int status of the instance
+ */
+int stats_is_initialized(struct statistics_t *stats)
+{
+    return stats->init;
 }
 
 /**
@@ -49,6 +66,9 @@ void stats_init(struct statistics_t *stats, int size)
 void stats_update(struct statistics_t *stats, const float val)
 {
     stats->raw = val;
+
+    if(stats->window_size < 2)
+        return;
 
     if(ring_buf_item_space_get(&stats->ring_val) < 2)
     {
@@ -122,6 +142,7 @@ void stats_reset(struct statistics_t *stats)
  */
 void stats_destroy(struct statistics_t *stats)
 {
+    stats->init = 0;
     k_free(stats->ring_sum.buffer);
     k_free(stats->ring_val.buffer);
 
@@ -136,6 +157,9 @@ void stats_destroy(struct statistics_t *stats)
  */
 float stats_get_mean(const struct statistics_t *stats)
 {
+    if(stats->window_size < 2)
+        return stats_get_raw(stats);
+
     return stats->mean;
 }
 
@@ -158,7 +182,7 @@ float stats_get_raw(const struct statistics_t *stats)
  */
 float stats_get_variance(const struct statistics_t *stats)
 {
-    if (stats < 2)
+    if (stats->step < 2)
         return stats->mean;
 
     return stats->sum2 / (stats->step - 1);
@@ -173,4 +197,15 @@ float stats_get_variance(const struct statistics_t *stats)
 int stats_get_step(const struct statistics_t *stats)
 {
     return stats->step;
+}
+
+/**
+ * @brief Gets size of averaging windows
+ *
+ * @param stats pointer to strcutre_t
+ * @return int windows size
+ */
+int stats_get_window_size(const struct statistics_t *stats)
+{
+    return stats->window_size;
 }

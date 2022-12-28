@@ -12,8 +12,15 @@ typedef enum
     RESPONDER
 } participant_t;
 
+typedef enum
+{
+    ENABLED,
+    DISABLED
+} ranging_state_t;
+
 struct ranging_t
 {
+    ranging_state_t ranging_state;
     participant_t role;
     struct statistics_t stats;
     uint8_t expected_packet_number;
@@ -35,7 +42,7 @@ extern "C"
 {
 #endif
 
-void node_init(struct node_t *node, uint16_t id);
+void node_init(struct node_t *node, uint16_t id, int window_size);
 
 void node_reset(struct node_t *node);
 

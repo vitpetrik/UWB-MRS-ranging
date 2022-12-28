@@ -21,7 +21,9 @@
         "uart.h": "c",
         "tty.h": "c",
         "ros.h": "c",
-        "ring_buffer.h": "c"
+        "ring_buffer.h": "c",
+        "platform.h": "c",
+        "spi.h": "c"
     },
     "cortex-debug.variableUseNaturalFormat": false
 }

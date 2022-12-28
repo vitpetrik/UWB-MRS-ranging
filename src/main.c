@@ -13,6 +13,7 @@
 #include <zephyr/sys/__assert.h>
 #include <zephyr/sys/reboot.h>
 #include <zephyr/logging/log.h>
+#include <zephyr/logging/log_ctrl.h>
 LOG_MODULE_REGISTER(main);
 
 #include <zephyr/device.h>
@@ -33,6 +34,7 @@ LOG_MODULE_REGISTER(main);
 #include "common_macro.h"
 #include "common_variables.h"
 #include "uwb_threads.h"
+#include "uwb_transport.h"
 #include "ranging.h"
 
 #include "mac.h"
@@ -86,20 +88,30 @@ K_MSGQ_DEFINE(uwb_msgq, sizeof(struct uwb_msg_t), 10, 4);
 void ros_rx_thread(void);
 void ros_tx_thread(void);
 
+void uwb_multiplex_rx();
+
 // Threads definitions
 
 K_THREAD_DEFINE(ros_rx_thr, 1024, ros_rx_thread, NULL, NULL, NULL, 6, 0, 0);
 K_THREAD_DEFINE(ros_tx_thr, 1024, ros_tx_thread, NULL, NULL, NULL, 6, 0, 0);
 
-K_THREAD_DEFINE(uwb_beacon_thr, 1024, uwb_beacon_thread, NULL, NULL, NULL, 5, 0, 0);
 K_THREAD_DEFINE(uwb_ranging_thr, 1024, uwb_ranging_thread, NULL, NULL, NULL, 5, 0, 0);
 
-K_THREAD_DEFINE(ranging_thr, 1024, ranging_thread, NULL, NULL, NULL, -3, 0, 0);
+// K_THREAD_DEFINE(ranging_thr, 1024, ranging_thread, NULL, NULL, NULL, -3, 0, 0);
+K_THREAD_DEFINE(uwb_multiplex_thr, 1024, uwb_multiplex_rx, NULL, NULL, NULL, -3, 0, 0);
 K_THREAD_DEFINE(uwb_tx_thr, 1024, uwb_tx_thread, NULL, NULL, NULL, -2, 0, 0);
+
+/**
+ * Timers callbacks
+ */
+
+void send_anchor_beacon_cb(struct k_timer *timer);
+
+K_TIMER_DEFINE(send_anchor_beacon_timer, send_anchor_beacon_cb, NULL);
 
 void setup_dwt()
 {
-// Get DWT Mutex
+    // Get DWT Mutex
     k_mutex_init(&dwt_mutex);
     k_mutex_lock(&dwt_mutex, K_FOREVER);
 
@@ -180,9 +192,9 @@ void main(void)
 
     msg.payload_size = serialize_ros(&ros, msg.payload);
 
-    for(int i = 0; i < 26; i++)
+    for (int i = 0; i < 26; i++)
     {
-        if(mrs_ranging.control != UNDETERMINED)
+        if (mrs_ranging.control != UNDETERMINED)
             break;
 
         gpio_pin_toggle_dt(&led3blue);
@@ -194,7 +206,7 @@ void main(void)
 
     gpio_pin_set_dt(&led3blue, 0);
 
-    if(mrs_ranging.control == UNDETERMINED)
+    if (mrs_ranging.control == UNDETERMINED)
         mrs_ranging.control = STANDALONE;
 
     LOG_INF("Selected mode: %s", mrs_ranging.control == ROS ? "ROS" : "STANDALONE");
@@ -208,20 +220,21 @@ void main(void)
 
     setup_dwt();
 
-    if(mrs_ranging.control == STANDALONE)
+    if (mrs_ranging.control == STANDALONE)
     {
         k_thread_abort(uwb_ranging_thr);
         k_thread_abort(ros_tx_thr);
+
+        k_timer_start(&send_anchor_beacon_timer, K_SECONDS(0), K_SECONDS(10));
     }
-    else 
+    else
     {
         k_thread_resume(uwb_ranging_thr);
         k_thread_resume(ros_tx_thr);
-        k_thread_resume(ros_rx_thr);
     }
 
-    k_thread_resume(uwb_beacon_thr);
-    k_thread_resume(ranging_thr);
+    k_thread_resume(ros_rx_thr);
+    k_thread_resume(uwb_multiplex_thr);
     k_thread_resume(uwb_tx_thr);
 
     LOG_INF("Device ID: 0x%X", DEVICE_ID);
@@ -241,6 +254,89 @@ void main(void)
         sleep_ms(600);
     }
 
+    return;
+}
+
+void uwb_multiplex_rx()
+{
+    k_tid_t thread = k_current_get();
+    k_thread_suspend(thread);
+
+    int status;
+
+    LOG_INF("UWB multiplex thread started");
+    struct rx_queue_t data;
+
+    struct uwb_msg_t msg;
+
+    while (1)
+    {
+        // wait for data
+        read_uwb(&data);
+
+        int source_id = data.mac_data.source_id;
+        struct rx_details_t *rx_details = &data.rx_details;
+
+        void *offseted_buf = &data.buffer_rx[data.buf_offset];
+
+        LOG_HEXDUMP_DBG(offseted_buf, data.frame_length, "Received data from UWB");
+
+        switch (data.mac_data.msg_type)
+        {
+        case RANGING_TYPE:
+            rx_ranging_ds(source_id, offseted_buf, rx_details);
+            break;
+        default:
+            if(mrs_ranging.control == STANDALONE)
+                break;
+
+            msg.msg_type = UWB_DATA;
+            msg.data.uwb_data_msg.source_mac = source_id;
+            msg.data.uwb_data_msg.destination_mac = data.mac_data.destination_id;
+            msg.data.uwb_data_msg.msg_type = data.mac_data.msg_type;
+            msg.data.uwb_data_msg.payload_size = data.frame_length;
+            msg.data.uwb_data_msg.payload = k_malloc(msg.data.uwb_data_msg.payload_size);
+            memcpy(msg.data.uwb_data_msg.payload, offseted_buf, msg.data.uwb_data_msg.payload_size);
+
+            status = k_msgq_put(&uwb_msgq, &msg, K_FOREVER);
+            __ASSERT(status == 0, "Putting message to queue Failed!");
+
+            break;
+        }
+
+        k_free(data.buffer_rx);
+    }
+}
+
+void send_anchor_beacon(struct k_work *work)
+{
+    struct tx_details_t tx_details = {
+        .ranging = 0,
+        .tx_mode = DWT_START_TX_IMMEDIATE | DWT_RESPONSE_EXPECTED,
+        .tx_timestamp = NULL};
+
+    struct anchor_msg_t anchor_msg;
+
+    anchor_msg.address = ANCHOR_BEACON;
+    anchor_msg.mode = 'w';
+    anchor_msg.data.anchor_beacon.capabilities = RDEV;
+
+    uint8_t buffer[sizeof(struct anchor_msg_t)];
+
+    int msg_length = serialize_anchor_msg(&anchor_msg, buffer);
+
+    LOG_HEXDUMP_DBG(buffer, msg_length, "Sending anchor packet");
+
+    write_uwb(0xffff, DATA, ANCHOR_TYPE, buffer, msg_length, &tx_details);
+
+    return;
+}
+
+K_WORK_DEFINE(send_anchor_work, send_anchor_beacon);
+
+void send_anchor_beacon_cb(struct k_timer *timer)
+{
+    k_work_submit(&send_anchor_work);
     return;
 }
 
@@ -265,14 +361,14 @@ void ros_tx_thread(void)
         switch (uwb_msg.msg_type)
         {
         case RANGING_DATA:
-            ros.mode = 'a';
             ros.address = RANGING_RESULT;
+            ros.mode = 'w';
 
             ros.data.ranging_msg = uwb_msg.data.ranging_msg;
             break;
         case UWB_DATA:
-            ros.mode = 'a';
             ros.address = TRX_DATA;
+            ros.mode = 'w';
 
             ros.data.uwb_data_msg = uwb_msg.data.uwb_data_msg;
             break;
@@ -302,6 +398,11 @@ void ros_rx_thread(void)
     msg_tx.payload = k_malloc(sizeof(struct ros_msg_t));
     bool request_send;
 
+    struct tx_details_t tx_details = {
+        .ranging = 0,
+        .tx_mode = DWT_START_TX_IMMEDIATE | DWT_RESPONSE_EXPECTED,
+        .tx_timestamp = NULL};
+
     while (1)
     {
         int payload_length = read_baca(&msg_rx);
@@ -321,19 +422,33 @@ void ros_rx_thread(void)
         switch (ros.address)
         {
         case WHO_I_AM:
+            if (ros.mode != 'r')
+                break;
             LOG_DBG("Received WHO_I_AM request");
-            ros.mode = 'a';
+            ros.mode = 'w';
             memcpy(ros.data.id_msg.id, APP_NAME, sizeof(APP_NAME));
             request_send = true;
             break;
+        case TRX_DATA:
+            LOG_HEXDUMP_DBG(ros.data.uwb_data_msg.payload, ros.data.uwb_data_msg.payload_size, "Sending TRX data");
+            write_uwb(ros.data.uwb_data_msg.destination_mac,
+                      DATA,
+                      ros.data.uwb_data_msg.msg_type,
+                      ros.data.uwb_data_msg.payload,
+                      ros.data.uwb_data_msg.payload_size,
+                      &tx_details);
+            break;
         case RESET:
+            log_panic();
             LOG_INF("Rebooting system on request from ROS");
-            sleep_ms(10);
             sys_reboot(0);
             break;
         case ROS_CONTROL:
-            if(mrs_ranging.control == UNDETERMINED)
+            if (mrs_ranging.control == UNDETERMINED)
                 mrs_ranging.control = ros.data.control;
+            break;
+        case REQUEST_RANGING:
+            request_ranging(ros.data.request_ranging.target_id, ros.data.request_ranging.preprocessing);
             break;
         default:
             break;
@@ -341,7 +456,7 @@ void ros_rx_thread(void)
 
         gpio_pin_set_dt(&led3blue, 0);
 
-        if(!request_send)
+        if (!request_send)
             continue;
 
         msg_tx.payload_size = serialize_ros(&ros, msg_tx.payload);

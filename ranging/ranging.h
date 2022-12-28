@@ -23,10 +23,7 @@ enum
 
 enum
 {
-    BEACON_MSG,
-    RANGING_INIT_MSG,
-    RANGING_RESPONSE_MSG,
-    RANGING_DS_MSG,
+    RANGING_DS_MSG = 2
 };
 
 enum
@@ -53,6 +50,10 @@ extern "C"
     int decode_ranging_pkt(struct ranging_pkt_t *ranging_pkt, const uint8_t *buffer_rx);
 
     int encode_ranging_pkt(const struct ranging_pkt_t *ranging_pkt, uint8_t *buffer_tx);
+
+    void request_ranging(uint16_t target_id, int preprocessing);
+
+    void disable_ranging(uint16_t target_id);
 
     /**
      * @brief Receiving thread, waits for queue

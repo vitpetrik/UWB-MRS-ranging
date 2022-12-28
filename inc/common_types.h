@@ -2,10 +2,6 @@
 #define __COMMON_TYPES_H__
 
 #include <zephyr/zephyr.h>
-#include "data_msg.pb.h"
-
-#include <pb_encode.h>
-#include <pb_decode.h>
 #include "deca_device_api.h"
 
 #include "mac.h"

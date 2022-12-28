@@ -15,10 +15,12 @@
 #include <zephyr/sys/ring_buffer.h>
 
 struct statistics_t {
+    int init;
     float mean;
     float sum2;
     float raw;
     int step;
+    int window_size;
     struct ring_buf ring_val;
     struct ring_buf ring_sum;
 };
@@ -34,6 +36,14 @@ struct statistics_t {
  * @param size size of ring buffer (aka sliding window size)
  */
 void stats_init(struct statistics_t *stats, int size);
+
+/**
+ * @brief Checks whether the stats is initialized
+ * 
+ * @param stats pointer to statistics_t
+ * @return int status of the instance
+ */
+int stats_is_initialized(struct statistics_t *stats);
 
 /**
  * @brief Update statistics with new value
@@ -88,6 +98,14 @@ float stats_get_variance(const struct statistics_t *stats);
  * @return int step
  */
 int stats_get_step(const struct statistics_t *stats);
+
+/**
+ * @brief Gets size of averaging windows
+ *
+ * @param stats pointer to strcutre_t
+ * @return int windows size
+ */
+int stats_get_window_size(const struct statistics_t *stats);
 
 #ifdef __cplusplus
 }
