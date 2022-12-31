@@ -63,6 +63,16 @@ static const struct gpio_dt_spec led1green = GPIO_DT_SPEC_GET(DT_NODELABEL(led1_
 static const struct gpio_dt_spec led2red = GPIO_DT_SPEC_GET(DT_NODELABEL(led2_red), gpios);
 static const struct gpio_dt_spec led3blue = GPIO_DT_SPEC_GET(DT_NODELABEL(led3_blue), gpios);
 
+// BUTTONS
+
+#define SW0_NODE	DT_ALIAS(sw0)
+#if !DT_NODE_HAS_STATUS(SW0_NODE, okay)
+#error "Unsupported board: sw0 devicetree alias is not defined"
+#endif
+static const struct gpio_dt_spec button = GPIO_DT_SPEC_GET_OR(SW0_NODE, gpios,
+							      {0});
+static struct gpio_callback button_cb_data;
+
 /* Default communication configuration. We use here EVK1000's mode 4. See NOTE 1 below. */
 static dwt_config_t config = {
     5,               /* Channel number. */
@@ -104,6 +114,8 @@ K_THREAD_DEFINE(uwb_tx_thr, 1024, uwb_tx_thread, NULL, NULL, NULL, -2, 0, 0);
 /**
  * Timers callbacks
  */
+
+void button_pressed(const struct device *dev, struct gpio_callback *cb, uint32_t pins);
 
 void send_anchor_beacon_cb(struct k_timer *timer);
 
@@ -175,39 +187,29 @@ void main(void)
     gpio_pin_configure_dt(&led2red, GPIO_OUTPUT_INACTIVE);
     gpio_pin_configure_dt(&led3blue, GPIO_OUTPUT_INACTIVE);
 
+    gpio_pin_configure_dt(&button, GPIO_INPUT);
+    gpio_pin_interrupt_configure_dt(&button, GPIO_INT_EDGE_TO_ACTIVE);
+	gpio_init_callback(&button_cb_data, button_pressed, BIT(button.pin));
+	gpio_add_callback(button.port, &button_cb_data);
+
     uart_setup();
 
     mrs_ranging.control == UNDETERMINED;
     mrs_ranging.dwt_config = config;
 
-    struct baca_protocol msg;
-    struct ros_msg_t ros;
-
-    ros.address = RESET;
-    ros.mode = 'w';
-    ros.data.reset = 0xff;
-
-    msg.payload = k_malloc(sizeof(struct ros_msg_t));
-    __ASSERT(msg.payload != NULL, "Failed to allocate buffer!");
-
-    msg.payload_size = serialize_ros(&ros, msg.payload);
-
-    for (int i = 0; i < 26; i++)
+    for (int i = 0; i < 14; i++)
     {
         if (mrs_ranging.control != UNDETERMINED)
             break;
 
         gpio_pin_toggle_dt(&led3blue);
-        write_baca(&msg);
-
         sleep_ms(400);
     }
-    k_free(msg.payload);
 
     gpio_pin_set_dt(&led3blue, 0);
 
     if (mrs_ranging.control == UNDETERMINED)
-        mrs_ranging.control = STANDALONE;
+        mrs_ranging.control = ROS;
 
     LOG_INF("Selected mode: %s", mrs_ranging.control == ROS ? "ROS" : "STANDALONE");
 
@@ -257,6 +259,14 @@ void main(void)
     return;
 }
 
+void button_pressed(const struct device *dev, struct gpio_callback *cb, uint32_t pins)
+{
+    if (mrs_ranging.control == UNDETERMINED)
+        mrs_ranging.control = STANDALONE;
+
+    return;
+}
+
 void uwb_multiplex_rx()
 {
     k_tid_t thread = k_current_get();
@@ -295,7 +305,10 @@ void uwb_multiplex_rx()
             msg.data.uwb_data_msg.destination_mac = data.mac_data.destination_id;
             msg.data.uwb_data_msg.msg_type = data.mac_data.msg_type;
             msg.data.uwb_data_msg.payload_size = data.frame_length;
+
             msg.data.uwb_data_msg.payload = k_malloc(msg.data.uwb_data_msg.payload_size);
+            __ASSERT(msg.data.uwb_data_msg.payload != NULL, "Failed to allocate buffer");
+
             memcpy(msg.data.uwb_data_msg.payload, offseted_buf, msg.data.uwb_data_msg.payload_size);
 
             status = k_msgq_put(&uwb_msgq, &msg, K_FOREVER);
@@ -342,13 +355,13 @@ void send_anchor_beacon_cb(struct k_timer *timer)
 
 void ros_tx_thread(void)
 {
-    struct baca_protocol msg;
+    struct baca_protocol msg_tx;
     struct ros_msg_t ros;
 
     struct uwb_msg_t uwb_msg;
 
-    msg.payload = k_malloc(sizeof(struct ros_msg_t));
-    __ASSERT(msg.payload != NULL, "Failed to allocate buffer!");
+    msg_tx.payload = k_malloc(256);
+    __ASSERT(msg_tx.payload != NULL, "Failed to allocate buffer!");
 
     while (1)
     {
@@ -376,13 +389,13 @@ void ros_tx_thread(void)
             break;
         }
 
-        msg.payload_size = serialize_ros(&ros, msg.payload);
-        write_baca(&msg);
+        msg_tx.payload_size = serialize_ros(&ros, msg_tx.payload);
+        write_baca(&msg_tx);
 
         gpio_pin_set_dt(&led2red, 0);
     }
 
-    k_free(msg.payload);
+    k_free(msg_tx.payload);
 }
 
 /**
@@ -395,7 +408,7 @@ void ros_rx_thread(void)
     struct baca_protocol msg_tx;
     struct ros_msg_t ros;
 
-    msg_tx.payload = k_malloc(sizeof(struct ros_msg_t));
+    msg_tx.payload = k_malloc(256);
     bool request_send;
 
     struct tx_details_t tx_details = {
@@ -407,7 +420,10 @@ void ros_rx_thread(void)
     {
         int payload_length = read_baca(&msg_rx);
         if (payload_length < 0)
+        {
+            LOG_INF("Received wrong checksum! Discarding the data");
             continue;
+        }
 
         LOG_HEXDUMP_DBG(msg_rx.payload, payload_length, "Received buffer from ROS");
 
@@ -437,6 +453,8 @@ void ros_rx_thread(void)
                       ros.data.uwb_data_msg.payload,
                       ros.data.uwb_data_msg.payload_size,
                       &tx_details);
+
+            k_free(ros.data.uwb_data_msg.payload);
             break;
         case RESET:
             log_panic();

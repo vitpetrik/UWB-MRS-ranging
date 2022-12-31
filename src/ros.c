@@ -11,6 +11,8 @@
  */
 
 #include "ros.h"
+#include <zephyr/sys/__assert.h>
+
 
 /**
  * @brief Serialize ros_msg_t to buffer
@@ -121,6 +123,7 @@ void deserialize_ros(struct ros_msg_t *msg, const uint8_t *buf)
         index += sizeof(msg->data.uwb_data_msg.payload_size);
 
         msg->data.uwb_data_msg.payload = k_malloc(msg->data.uwb_data_msg.payload_size);
+        __ASSERT(msg->data.uwb_data_msg.payload != NULL, "Failed to allocate buffer!");
 
         memcpy(msg->data.uwb_data_msg.payload, &buf[index], msg->data.uwb_data_msg.payload_size);
         index += msg->data.uwb_data_msg.payload_size;
