@@ -293,6 +293,7 @@ int rx_ranging_ds(const uint16_t source_id, void *msg, struct rx_details_t *rx_d
     uwb_msg.data.ranging_msg.source_mac = source_id;
     uwb_msg.data.ranging_msg.range = stats_get_mean(stats);
     uwb_msg.data.ranging_msg.variance = stats_get_variance(stats);
+    uwb_msg.data.ranging_msg.raw = stats_get_raw(stats);
 
     LOG_INF("Ranging from ID 0x%X %.2f m | %.4f dev TOF: %.2f ns", source_id, stats_get_mean(stats), stats_get_variance(stats), tof*1e9);
 
