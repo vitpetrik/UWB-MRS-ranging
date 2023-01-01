@@ -83,7 +83,7 @@ struct ranging_msg_t {
     float range;
     float variance;
 
-    float raw
+    float raw;
 };
 
 struct uwb_data_msg_t {
