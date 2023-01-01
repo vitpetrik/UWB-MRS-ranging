@@ -87,6 +87,7 @@ static dwt_config_t config = {
     (128 + 8 + 1)    /* SFD timeout (preamble length + 1 + SFD length - PAC size). Used in RX only. */
 };
 
+
 K_MSGQ_DEFINE(uwb_msgq, sizeof(struct uwb_msg_t), 10, 4);
 
 // Threads declarations
@@ -111,16 +112,17 @@ K_THREAD_DEFINE(uwb_ranging_thr, 1024, uwb_ranging_thread, NULL, NULL, NULL, 5, 
 K_THREAD_DEFINE(uwb_multiplex_thr, 1024, uwb_multiplex_rx, NULL, NULL, NULL, -3, 0, 0);
 K_THREAD_DEFINE(uwb_tx_thr, 1024, uwb_tx_thread, NULL, NULL, NULL, -2, 0, 0);
 
-/**
- * Timers callbacks
- */
+// CALLBACKS
+
+void send_anchor_beacon_cb(struct k_timer *timer);
+K_TIMER_DEFINE(send_anchor_beacon_timer, send_anchor_beacon_cb, NULL);
 
 void button_pressed(const struct device *dev, struct gpio_callback *cb, uint32_t pins);
 
-void send_anchor_beacon_cb(struct k_timer *timer);
-
-K_TIMER_DEFINE(send_anchor_beacon_timer, send_anchor_beacon_cb, NULL);
-
+/**
+ * @brief Set up the DW1000 tranciever
+ * 
+ */
 void setup_dwt()
 {
     // Get DWT Mutex
@@ -187,16 +189,21 @@ void main(void)
     gpio_pin_configure_dt(&led2red, GPIO_OUTPUT_INACTIVE);
     gpio_pin_configure_dt(&led3blue, GPIO_OUTPUT_INACTIVE);
 
+    // Set button interrupt
     gpio_pin_configure_dt(&button, GPIO_INPUT);
     gpio_pin_interrupt_configure_dt(&button, GPIO_INT_EDGE_TO_ACTIVE);
 	gpio_init_callback(&button_cb_data, button_pressed, BIT(button.pin));
 	gpio_add_callback(button.port, &button_cb_data);
 
+    // Set UART communications for ROS 
     uart_setup();
 
+    // Set global state data
     mrs_ranging.control == UNDETERMINED;
     mrs_ranging.dwt_config = config;
 
+    // Wait loop to determine whether to use Standalone or ROS mode
+    // It's dead simple but works as intended
     for (int i = 0; i < 14; i++)
     {
         if (mrs_ranging.control != UNDETERMINED)
@@ -206,8 +213,11 @@ void main(void)
         sleep_ms(400);
     }
 
+    // make sure the blue LED is switched OFF
     gpio_pin_set_dt(&led3blue, 0);
 
+    // If the user did not pressed the button
+    // then set ROS mode
     if (mrs_ranging.control == UNDETERMINED)
         mrs_ranging.control = ROS;
 
@@ -222,6 +232,7 @@ void main(void)
 
     setup_dwt();
 
+    // Start threads based on control mode
     if (mrs_ranging.control == STANDALONE)
     {
         k_thread_abort(uwb_ranging_thr);
@@ -294,12 +305,13 @@ void uwb_multiplex_rx()
         switch (data.mac_data.msg_type)
         {
         case RANGING_TYPE:
+            // Handle only ranging data
             rx_ranging_ds(source_id, offseted_buf, rx_details);
             break;
         default:
             if(mrs_ranging.control == STANDALONE)
                 break;
-
+            // If generic data is received than send it over UART to ROS
             msg.msg_type = UWB_DATA;
             msg.data.uwb_data_msg.source_mac = source_id;
             msg.data.uwb_data_msg.destination_mac = data.mac_data.destination_id;
@@ -323,6 +335,7 @@ void uwb_multiplex_rx()
 
 void send_anchor_beacon(struct k_work *work)
 {
+    // if in standalone mode send Anchor data
     struct tx_details_t tx_details = {
         .ranging = 0,
         .tx_mode = DWT_START_TX_IMMEDIATE | DWT_RESPONSE_EXPECTED,
@@ -365,12 +378,14 @@ void ros_tx_thread(void)
 
     while (1)
     {
+        // Get data from UWB
         int status = k_msgq_get(&uwb_msgq, (void *)&uwb_msg, K_FOREVER);
         gpio_pin_set_dt(&led2red, 1);
 
         if (status != 0)
             continue;
 
+        // Setup message
         switch (uwb_msg.msg_type)
         {
         case RANGING_DATA:
@@ -389,6 +404,7 @@ void ros_tx_thread(void)
             break;
         }
 
+        // Serialize and send the data
         msg_tx.payload_size = serialize_ros(&ros, msg_tx.payload);
         write_baca(&msg_tx);
 
@@ -418,7 +434,9 @@ void ros_rx_thread(void)
 
     while (1)
     {
+        // Read data from UART send over BACA
         int payload_length = read_baca(&msg_rx);
+
         if (payload_length < 0)
         {
             LOG_INF("Received wrong checksum! Discarding the data");
@@ -435,6 +453,7 @@ void ros_rx_thread(void)
         LOG_DBG("Ros command at address: 0x%X", ros.address);
         request_send = false;
 
+        // handle the data based on address
         switch (ros.address)
         {
         case WHO_I_AM:

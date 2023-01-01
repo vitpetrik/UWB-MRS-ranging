@@ -1,3 +1,14 @@
+/**
+ * @file ranging.h
+ * @author Vit Petrik (petrivi2@fel.cvut.cz)
+ * @brief Ranging Related function
+ * @version 0.1
+ * @date 2022-09-17
+ * 
+ * @copyright Copyright (c) 2022
+ * 
+ */
+
 #ifndef __RANGING_H__
 #define __RANGING_H__
 
@@ -16,20 +27,11 @@ enum
     RX_ENABLE
 };
 
+#define RANGING_MSG_TYPE 0x10
+
 
 #include "common_types.h"
 #include "deca_device_api.h"
-
-
-enum
-{
-    RANGING_DS_MSG = 2
-};
-
-enum
-{
-    UAV_TYPE_DEFAULT = 0
-};
 
 #define ENCODED_RANGING_PKT_LENGTH 13
 
@@ -47,30 +49,54 @@ extern "C"
 {
 #endif
 
+    /**
+     * @brief Decode ranging buffer
+     * 
+     * @param ranging_pkt pointer to ranging paket
+     * @param buffer_rx pointer to received buffer
+     * @return int returns length of message
+     */
     int decode_ranging_pkt(struct ranging_pkt_t *ranging_pkt, const uint8_t *buffer_rx);
 
+    /**
+     * @brief 
+     * 
+     * @param ranging_pkt pointer to ranging paket
+     * @param buffer_tx pointer to transmit buffer
+     * @return int returns length of message
+     */
     int encode_ranging_pkt(const struct ranging_pkt_t *ranging_pkt, uint8_t *buffer_tx);
 
+    /**
+     * @brief Sends ranging request to target_id
+     * 
+     * @param target_id MAC address of target node
+     * @param preprocessing Size of averaging windows
+     */
     void request_ranging(uint16_t target_id, int preprocessing);
 
+    /**
+     * @brief Disable ranging for target_id
+     * 
+     * @param target_id MAC address of target node
+     */
     void disable_ranging(uint16_t target_id);
 
     /**
-     * @brief Receiving thread, waits for queue
-     *
+     * @brief Function to handle Double sided ranging
+     * 
+     * @param source_id MAC address of received packet
+     * @param msg received buffer
+     * @param rx_details Details about received packet
+     * @return int status (Not actually used)
      */
-    void ranging_thread(void);
-
-    // THREADS
-    void uwb_beacon_thread(void);
-    void uwb_ranging_thread(void);
-    void uwb_ranging_print_thread(void);
-
-    // FUNCTIONS
-    int rx_message(struct rx_queue_t *queue_data);
-
-    int rx_beacon(const uint16_t source_id, void *msg);
     int rx_ranging_ds(const uint16_t source_id, void *msg, struct rx_details_t *queue_data);
+
+    /**
+     * @brief Ranging thread periodically checks status of nodes and request ranging if packet lost happend
+     */
+    void uwb_ranging_thread(void);
+
 
 #ifdef __cplusplus
 }

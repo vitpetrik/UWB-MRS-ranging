@@ -56,7 +56,12 @@ void write_uwb(const uint16_t destination_id, const frame_type_t frame_type, con
     return;
 }
 
-
+/**
+ * @brief Wait for input from message queue
+ * 
+ * @param data pointer to data strucutre where the data will be stored
+ * @return int returns status of k_msgq_get
+ */
 int read_uwb(struct rx_queue_t *data)
 {
     return k_msgq_get(&uwb_rx_msgq, data, K_FOREVER);

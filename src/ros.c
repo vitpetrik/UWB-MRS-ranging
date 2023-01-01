@@ -13,6 +13,11 @@
 #include "ros.h"
 #include <zephyr/sys/__assert.h>
 
+/**
+ * ! All of this is using extreamly dumb and repetitive way
+ * ! of doing things... more elegant solution might be possible
+ * ! but dont change what ain't broken! :-)
+ */
 
 /**
  * @brief Serialize ros_msg_t to buffer
@@ -148,6 +153,13 @@ void deserialize_ros(struct ros_msg_t *msg, const uint8_t *buf)
     }
 }
 
+/**
+ * @brief Serialize anchor_msg_t to buffer
+ * 
+ * @param msg pointer to anchor_msg_t structure
+ * @param buf pointer to buffer
+ * @return int returns the overall size of serialized data
+ */
 int serialize_anchor_msg(const struct anchor_msg_t *msg, uint8_t *buf)
 {
     int index = 0;

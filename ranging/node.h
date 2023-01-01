@@ -1,10 +1,19 @@
+/**
+ * @file node.h
+ * @author Vit Petrik (petrivi2@fel.cvut.cz)
+ * @brief Node struct thats mandatory for ranging
+ * @version 0.1
+ * @date 2022-12-28
+ * 
+ * @copyright Copyright (c) 2022
+ * 
+ */
+
 #ifndef __NODE_H__
 #define __NODE_H__
 
 #include <stdint.h>
 #include "statistics.h"
-
-#define AVERAGE_WINDOW 20
 
 typedef enum
 {
@@ -42,11 +51,28 @@ extern "C"
 {
 #endif
 
-void node_init(struct node_t *node, uint16_t id, int window_size);
+    /**
+     * @brief Initialize Node struct
+     * 
+     * @param node pointer to node_t
+     * @param id Id of node
+     * @param window_size Windows size for averaging
+     */
+    void node_init(struct node_t *node, uint16_t id, int window_size);
 
-void node_reset(struct node_t *node);
+    /**
+     * @brief Reset node
+     * 
+     * @param node pointer to node_t
+     */
+    void node_reset(struct node_t *node);
 
-void node_destroy(struct node_t *node);
+    /**
+     * @brief Destroy node_t object
+     * 
+     * @param node pointer to node_t
+     */
+    void node_destroy(struct node_t *node);
 
 #ifdef __cplusplus
 }

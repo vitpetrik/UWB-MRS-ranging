@@ -1,5 +1,23 @@
+/**
+ * @file node.c
+ * @author Vit Petrik (petrivi2@fel.cvut.cz)
+ * @brief Node struct thats mandatory for ranging
+ * @version 0.1
+ * @date 2022-12-28
+ * 
+ * @copyright Copyright (c) 2022
+ * 
+ */
+
 #include "node.h"
 
+/**
+ * @brief Initialize Node struct
+ * 
+ * @param node pointer to node_t
+ * @param id Id of node
+ * @param window_size Windows size for averaging
+ */
 void node_init(struct node_t *node, uint16_t id, int window_size)
 {
     node->id = id;
@@ -17,6 +35,11 @@ void node_init(struct node_t *node, uint16_t id, int window_size)
     return;
 }
 
+/**
+ * @brief Reset node
+ * 
+ * @param node pointer to node_t
+ */
 void node_reset(struct node_t *node)
 {
     node->ranging.ranging_state = DISABLED;
@@ -30,6 +53,11 @@ void node_reset(struct node_t *node)
     return;
 }
 
+/**
+ * @brief Destroy node_t object
+ * 
+ * @param node pointer to node_t
+ */
 void node_destroy(struct node_t *node)
 {
     stats_destroy(&node->ranging.stats);

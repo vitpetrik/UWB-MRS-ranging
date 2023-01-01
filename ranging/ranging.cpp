@@ -1,7 +1,17 @@
+/**
+ * @file ranging.cpp
+ * @author Vit Petrik (petrivi2@fel.cvut.cz)
+ * @brief Ranging Related function
+ * @version 0.1
+ * @date 2022-09-17
+ * 
+ * @copyright Copyright (c) 2022
+ * 
+ */
+
 #include <zephyr/zephyr.h>
 #include <zephyr/sys/__assert.h>
 #include <zephyr/logging/log.h>
-LOG_MODULE_REGISTER(ranging);
 
 #include <unordered_map>
 #include <iostream>
@@ -20,17 +30,19 @@ LOG_MODULE_REGISTER(ranging);
 
 #include "node.h"
 
-#define INTEGRATOR_ALPHA 1
-#define DISTANCE_ALPHA 1
+LOG_MODULE_REGISTER(ranging);
 
 typedef std::unordered_map<uint32_t, struct node_t *> devices_map_t;
-typedef std::unordered_map<uint16_t, uint64_t *> tx_timestamps_map_t;
-
-tx_timestamps_map_t tx_timestamps_map;
 
 devices_map_t devices_map;
-K_SEM_DEFINE(print_ranging_semaphore, 0, 1);
 
+/**
+ * @brief Decode ranging buffer
+ * 
+ * @param ranging_pkt pointer to ranging paket
+ * @param buffer_rx pointer to received buffer
+ * @return int returns length of message
+ */
 int decode_ranging_pkt(struct ranging_pkt_t *ranging_pkt, const uint8_t *buffer_rx)
 {
     memcpy(&ranging_pkt->packet_number, buffer_rx, sizeof(uint8_t));
@@ -45,6 +57,13 @@ int decode_ranging_pkt(struct ranging_pkt_t *ranging_pkt, const uint8_t *buffer_
     return ENCODED_RANGING_PKT_LENGTH;
 }
 
+/**
+ * @brief 
+ * 
+ * @param ranging_pkt pointer to ranging paket
+ * @param buffer_tx pointer to transmit buffer
+ * @return int returns length of message
+ */
 int encode_ranging_pkt(const struct ranging_pkt_t *ranging_pkt, uint8_t *buffer_tx)
 {
     memcpy(buffer_tx, &ranging_pkt->packet_number, sizeof(uint8_t));
@@ -59,6 +78,12 @@ int encode_ranging_pkt(const struct ranging_pkt_t *ranging_pkt, uint8_t *buffer_
     return ENCODED_RANGING_PKT_LENGTH;
 }
 
+/**
+ * @brief Sends ranging request to target_id
+ * 
+ * @param target_id MAC address of target node
+ * @param preprocessing Size of averaging windows
+ */
 void request_ranging(uint16_t target_id, int preprocessing)
 {
     LOG_INF("Requesting ranging for 0x%X and window size %d", target_id, preprocessing);
@@ -87,6 +112,11 @@ void request_ranging(uint16_t target_id, int preprocessing)
     return;
 }
 
+/**
+ * @brief Disable ranging for target_id
+ * 
+ * @param target_id MAC address of target node
+ */
 void disable_ranging(uint16_t target_id)
 {
     if (not devices_map.contains(target_id))
@@ -98,6 +128,33 @@ void disable_ranging(uint16_t target_id)
     return;
 }
 
+/**
+ * ? Since we want to introduce sime delay between received packet and transimted packet
+ * ? The best way is to use scheduled work
+ */
+struct scheduled_ranging
+{
+    struct k_work_delayable work;
+    uint8_t buffer[ENCODED_RANGING_PKT_LENGTH];
+    uint16_t destination;
+    struct tx_details_t tx_details;
+};
+
+void submit_handler(struct k_work *item)
+{
+    struct scheduled_ranging *data = CONTAINER_OF(item, struct scheduled_ranging, work);
+    write_uwb(data->destination, DATA, RANGING_MSG_TYPE, (const uint8_t *)data->buffer, sizeof(data->buffer), &data->tx_details);
+
+    k_free(data);
+    return;
+}
+
+/**
+ * @brief Calculate TOD from Ra, Da, Rb, Db
+ * 
+ * @param data pointer to ranging packet
+ * @return float calculated time of flight
+ */
 float ToF_DS(ranging_pkt_t *data)
 {
     float Ra, Rb, Da, Db;
@@ -112,24 +169,15 @@ float ToF_DS(ranging_pkt_t *data)
     return tof;
 }
 
-struct scheduled_ranging
-{
-    struct k_work_delayable work;
-    uint8_t buffer[ENCODED_RANGING_PKT_LENGTH];
-    uint16_t destination;
-    struct tx_details_t tx_details;
-};
-
-void submit_handler(struct k_work *item)
-{
-    struct scheduled_ranging *data = CONTAINER_OF(item, struct scheduled_ranging, work);
-    write_uwb(data->destination, MAC_COMMAND, RANGING_DS_MSG, (const uint8_t *)data->buffer, sizeof(data->buffer), &data->tx_details);
-
-    k_free(data);
-    return;
-}
-
-int rx_ranging_ds(const uint16_t source_id, void *msg, struct rx_details_t *queue_data)
+/**
+ * @brief Function to handle Double sided ranging
+ * 
+ * @param source_id MAC address of received packet
+ * @param msg received buffer
+ * @param rx_details Details about received packet
+ * @return int status (Not actually used)
+ */
+int rx_ranging_ds(const uint16_t source_id, void *msg, struct rx_details_t *rx_details)
 {
     int status;
     uint8_t *msg_uint8_t = (uint8_t *)msg;
@@ -139,6 +187,7 @@ int rx_ranging_ds(const uint16_t source_id, void *msg, struct rx_details_t *queu
     ranging_pkt_t ranging_pkt;
     decode_ranging_pkt(&ranging_pkt, (const uint8_t *)msg);
 
+    //  Create node if not existing yet
     if (not devices_map.contains(source_id))
     {
         struct node_t *node = (struct node_t *)k_calloc(1, sizeof(struct node_t));
@@ -153,6 +202,7 @@ int rx_ranging_ds(const uint16_t source_id, void *msg, struct rx_details_t *queu
     if(node->ranging.ranging_state == DISABLED)
         return 0;
 
+    // Handle Packet number
     if (ranging_pkt.packet_number == 0)
     {
         node->ranging.role = RESPONDER;
@@ -175,16 +225,18 @@ int rx_ranging_ds(const uint16_t source_id, void *msg, struct rx_details_t *queu
 
     ranging_pkt.packet_number = (ranging_pkt.packet_number + 1) / 255 + (ranging_pkt.packet_number + 1) % 255;
 
+    // Update ranging struct status
     node->ranging.last_meas_time = k_uptime_get_32();
     node->ranging.error_counter = 0;
 
+    // Get more data
     if (ranging_pkt.RoundB == 0 && ranging_pkt.RoundA == 0 && ranging_pkt.DelayB == 0)
     {
         node->ranging.tx_timestamp = 0;
     }
     else
     {
-        uint64_t rx_timestamp = queue_data->rx_timestamp;
+        uint64_t rx_timestamp = rx_details->rx_timestamp;
         uint64_t tx_timestamp = node->ranging.tx_timestamp;
 
         if (rx_timestamp > tx_timestamp)
@@ -193,11 +245,12 @@ int rx_ranging_ds(const uint16_t source_id, void *msg, struct rx_details_t *queu
             ranging_pkt.RoundA = rx_timestamp + (0x000000ffffffffffU - tx_timestamp);
     }
 
+    // Setup reply
     struct tx_details_t tx_details = {
         .ranging = 1,
         .tx_mode = DWT_START_TX_DELAYED | DWT_RESPONSE_EXPECTED,
         .tx_timestamp = &(node->ranging.tx_timestamp),
-        .tx_delay = {.rx_timestamp = queue_data->rx_timestamp, .reserved_time = 1000, .offset = 5}};
+        .tx_delay = {.rx_timestamp = rx_details->rx_timestamp, .reserved_time = 1000, .offset = 5}};
 
     struct scheduled_ranging *work = (struct scheduled_ranging *)k_malloc(sizeof(struct scheduled_ranging));
     __ASSERT(work != NULL, "Ouch! malloc failed :-(");
@@ -213,6 +266,7 @@ int rx_ranging_ds(const uint16_t source_id, void *msg, struct rx_details_t *queu
     status = k_work_schedule(&work->work, K_MSEC(10 * devices_map.size()));
     __ASSERT(status >= 0, "Error scheduling delayed work, status: %d", status);
 
+    // Now, calculate the actual if it even makes sense
     if(!stats_is_initialized(&node->ranging.stats))
         return 0;
 
@@ -232,6 +286,7 @@ int rx_ranging_ds(const uint16_t source_id, void *msg, struct rx_details_t *queu
     struct statistics_t *stats = &node->ranging.stats;
     stats_update(stats, dist);
 
+    // Send message to queue for ROS_RX thread
     struct uwb_msg_t uwb_msg;
 
     uwb_msg.msg_type = RANGING_DATA;
@@ -250,12 +305,15 @@ int rx_ranging_ds(const uint16_t source_id, void *msg, struct rx_details_t *queu
     return 0;
 }
 
-// RANGING THREAD
+/**
+ * @brief Ranging thread periodically checks status of nodes and request ranging if packet lost happend
+ */
 void uwb_ranging_thread(void)
 {
     k_tid_t thread = k_current_get();
     k_thread_suspend(thread);
 
+    // Initialize empty buffer
     uint32_t empty[] = {0, 0, 0, 0, 0};
 
     LOG_INF("Ranging thread started");
@@ -267,12 +325,20 @@ void uwb_ranging_thread(void)
             uint32_t device_id = node_ptr.first;
             struct node_t *node = (struct node_t *)node_ptr.second;
 
+            // Check time of last received ranging data
             if (node->ranging.ranging_state == DISABLED || (k_uptime_get_32() - node->ranging.last_meas_time) < 100)
                 continue;
 
+
+            // Handle Error caounter
             node->ranging.error_counter++;
 
-            if (node->ranging.error_counter > 100)
+            // After 10 fails switch to initiator role
+            if(node->ranging.error_counter > 10)
+                node->ranging.role = INITIATOR;
+
+            // After 20 fails delete the node as it is no longer ONLINE
+            if (node->ranging.error_counter > 20)
             {
                 node_destroy(node);
                 devices_map.erase(node_ptr.first);
@@ -282,22 +348,26 @@ void uwb_ranging_thread(void)
                 continue;
             }
 
+            // Onlt INITIATOR has permission to request ranging
             if (node->ranging.role == RESPONDER)
                 continue;
 
+            // update status
             node->ranging.last_meas_time = k_uptime_get_32();
             node->ranging.tx_timestamp = 0;
             node->ranging.expected_packet_number = 1;
 
+            // Reset statistics
             stats_reset(&node->ranging.stats);
+
+
+            LOG_INF("Requesting ranging to device 0x%X", device_id);
             struct tx_details_t tx_details = {
                 .ranging = 1,
                 .tx_mode = DWT_START_TX_IMMEDIATE | DWT_RESPONSE_EXPECTED,
                 .tx_timestamp = &(node->ranging.tx_timestamp)};
 
-            LOG_INF("Requesting ranging to device 0x%X", device_id);
-
-            write_uwb(device_id, MAC_COMMAND, RANGING_DS_MSG, (uint8_t *)empty, ENCODED_RANGING_PKT_LENGTH, &tx_details);
+            write_uwb(device_id, DATA, RANGING_MSG_TYPE, (uint8_t *)empty, ENCODED_RANGING_PKT_LENGTH, &tx_details);
         }
         sleep_ms(100);
     }

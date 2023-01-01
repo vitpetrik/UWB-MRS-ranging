@@ -36,9 +36,10 @@ extern "C"
 void write_uwb(const uint16_t destination_id, const frame_type_t frame_type, const int msg_type, const uint8_t *msg, int len, struct tx_details_t *tx_details);
 
 /**
- * @brief Waits for data from UWB
- *
- * @return struct rx_queue_t* pointer to received data
+ * @brief Wait for input from message queue
+ * 
+ * @param data pointer to data strucutre where the data will be stored
+ * @return int returns status of k_msgq_get
  */
 int read_uwb(struct rx_queue_t *data);
 

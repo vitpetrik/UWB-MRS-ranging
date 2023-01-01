@@ -15,12 +15,13 @@
 #include "stdio.h"
 
 #include "common_types.h"
+#include "ranging.h"
 
 enum PACKET_MSG_TYPES
 {
     ROS_TYPE,
     ANCHOR_TYPE,
-    RANGING_TYPE
+    RANGING_TYPE = RANGING_MSG_TYPE
 };
 
 enum address_t
@@ -113,13 +114,20 @@ extern "C"
     int serialize_ros(const struct ros_msg_t *msg, uint8_t *buf);
 
     /**
-     * @brief Desiralize buffer data to ros_msg_t
+     * @brief Deserialize buffer data to ros_msg_t
      *
      * @param msg pointer to ros_msg_t structure
      * @param buf pointer to buffer in which the data lies
      */
     void deserialize_ros(struct ros_msg_t *msg, const uint8_t *buf);
 
+    /**
+     * @brief Serialize anchor_msg_t to buffer
+     * 
+     * @param msg pointer to anchor_msg_t structure
+     * @param buf pointer to buffer
+     * @return int returns the overall size of serialized data
+     */
     int serialize_anchor_msg(const struct anchor_msg_t *msg, uint8_t *buf);
 
 #ifdef __cplusplus
