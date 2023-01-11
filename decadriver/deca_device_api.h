@@ -67,7 +67,7 @@ typedef signed long int32;
 #define DWT_SUCCESS (0)
 #define DWT_ERROR   (-1)
 
-#define DWT_TIME_UNITS          (1.0/499.2e6/128.0) //!< = 15.65e-12 s
+#define DWT_TIME_UNITS          (15.65e-12) //!< = 15.65e-12 s
 
 #define DWT_DEVICE_ID   (0xDECA0130)        //!< DW1000 MP device ID
 

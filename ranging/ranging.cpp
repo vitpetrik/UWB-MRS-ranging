@@ -155,16 +155,16 @@ void submit_handler(struct k_work *item)
  * @param data pointer to ranging packet
  * @return float calculated time of flight
  */
-float ToF_DS(ranging_pkt_t *data)
+double ToF_DS(const ranging_pkt_t *data)
 {
-    float Ra, Rb, Da, Db;
+    double Ra, Rb, Da, Db;
 
-    Ra = (float) data->RoundA;
-    Da = (float) data->DelayA;
-    Rb = (float) data->RoundB;
-    Db = (float) data->DelayB;
+    Ra = (double) data->RoundA;
+    Da = (double) data->DelayA;
+    Rb = (double) data->RoundB;
+    Db = (double) data->DelayB;
 
-    float tof = (float)DWT_TIME_UNITS * (Ra * Rb - Da * Db) / (Ra + Da + Rb + Db);
+    double tof = (double)DWT_TIME_UNITS * (Ra * Rb - Da * Db) / (Ra + Da + Rb + Db);
 
     return tof;
 }
@@ -275,8 +275,8 @@ int rx_ranging_ds(const uint16_t source_id, void *msg, struct rx_details_t *rx_d
 
     LOG_DBG("Ra: %d Da: %d Rb: %d Db: %d", ranging_pkt.RoundA, ranging_pkt.DelayA, ranging_pkt.RoundB, ranging_pkt.DelayB);
 
-    float tof = ToF_DS(&ranging_pkt);
-    float dist = SPEED_OF_LIGHT * tof;
+    double tof = ToF_DS(&ranging_pkt);
+    float dist = (float) (SPEED_OF_LIGHT * tof);
 
     if (abs(dist) > 1000)
     {
