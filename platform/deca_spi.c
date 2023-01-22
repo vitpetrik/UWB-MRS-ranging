@@ -21,10 +21,15 @@
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/drivers/spi.h>
 
+#include <zephyr/drivers/pinctrl.h>
+
 #include "deca_device_api.h"
 #include "platform.h"
 
-struct device *spi = DEVICE_DT_GET(DT_NODELABEL(spi2));
+#include <nrfx_spim.h>
+
+#define SPIM_NODE  DT_NODELABEL(spi2)
+static nrfx_spim_t spim = NRFX_SPIM_INSTANCE(2);
 
 const struct spi_cs_control cs_ctrl = {
     .gpio = {
@@ -33,17 +38,6 @@ const struct spi_cs_control cs_ctrl = {
         .dt_flags = GPIO_ACTIVE_LOW},
     .delay = 0,
 };
-
-struct spi_config dwt_spi_cfg_slow = {
-    .frequency = 2000000U,
-    .operation = SPI_WORD_SET(8) | SPI_TRANSFER_MSB | SPI_OP_MODE_MASTER,
-    .cs = &cs_ctrl};
-struct spi_config dwt_spi_cfg_fast = {
-    .frequency = 8000000U,
-    .operation = SPI_WORD_SET(8) | SPI_TRANSFER_MSB | SPI_OP_MODE_MASTER,
-    .cs = &cs_ctrl};
-
-struct spi_config *dwt_spi_cfg;
 
 /*! ------------------------------------------------------------------------------------------------------------------
  * Function: writetospi()
@@ -54,23 +48,23 @@ struct spi_config *dwt_spi_cfg;
  */
 int writetospi(uint16 headerLength, const uint8 *headerBuffer, uint32 bodylength, const uint8 *bodyBuffer)
 {
-    struct spi_buf spi_buf_tx[] = {
-        {.buf = (uint8_t*) headerBuffer,
-         .len = headerLength},
-        {.buf = (uint8_t*) bodyBuffer,
-         .len = bodylength}};
+    uint8_t tx_data[headerLength + bodylength];
 
-    struct spi_buf spi_buf_rx[] = {
-        {.buf = NULL,
-         .len = headerLength},
-        {.buf = NULL,
-         .len = bodylength}};
+    memcpy(&tx_data[0], headerBuffer, headerLength);
+    memcpy(&tx_data[headerLength], bodyBuffer, bodylength);
 
-    struct spi_buf_set buff_tx = {.buffers = spi_buf_tx, .count = 2};
-    struct spi_buf_set buff_rx = {.buffers = spi_buf_rx, .count = 2};
+    nrfx_spim_xfer_desc_t xfer_desc = {
+		.p_tx_buffer = tx_data,
+		.tx_length = headerLength + bodylength,
+		.p_rx_buffer = NULL,
+		.rx_length = 0,
+	};
 
-    int error = spi_transceive(spi, dwt_spi_cfg, &buff_tx, &buff_rx);
-    __ASSERT(error == 0, "Error in SPI transmission");
+
+	nrf_gpio_pin_write(NRF_DT_GPIOS_TO_PSEL(SPIM_NODE, cs_gpios), 0);
+    int error = nrfx_spim_xfer(&spim, &xfer_desc, 0);
+	nrf_gpio_pin_write(NRF_DT_GPIOS_TO_PSEL(SPIM_NODE, cs_gpios), 1);
+    __ASSERT(error == NRFX_SUCCESS, "Error in SPI transmission");
 
     return 0;
 
@@ -86,33 +80,82 @@ int writetospi(uint16 headerLength, const uint8 *headerBuffer, uint32 bodylength
  */
 int readfromspi(uint16 headerLength, const uint8 *headerBuffer, uint32 readlength, uint8 *readBuffer)
 {
-    uint8 empty_buffer[readlength];
-    memset(empty_buffer, 0, readlength);
-    const struct spi_buf spi_buf_tx[] = {
-        {.buf = (uint8_t*) headerBuffer,
-         .len = headerLength},
-        {.buf = empty_buffer,
-         .len = readlength}};
-    struct spi_buf spi_buf_rx[] = {
-        {.buf = NULL,
-         .len = headerLength},
-        {.buf = readBuffer,
-         .len = readlength}};
+    uint8_t tx_data[headerLength + readlength];
+    uint8_t rx_data[headerLength + readlength];
+    memset(tx_data, headerLength + readlength, sizeof(uint8_t));
+    memset(rx_data, headerLength + readlength, sizeof(uint8_t));
 
-    struct spi_buf_set buff_tx = {.buffers = spi_buf_tx, .count = 2};
-    struct spi_buf_set buff_rx = {.buffers = spi_buf_rx, .count = 2};
+    memcpy(tx_data, headerBuffer, headerLength);
 
-    int error = spi_transceive(spi, dwt_spi_cfg, &buff_tx, &buff_rx);
-    __ASSERT(error == 0, "Error in SPI transmission");
+    nrfx_spim_xfer_desc_t xfer_desc = {
+		.p_tx_buffer = tx_data,
+		.tx_length = headerLength + readlength,
+		.p_rx_buffer = rx_data,
+		.rx_length = headerLength + readlength,
+	};
+
+	nrf_gpio_pin_write(NRF_DT_GPIOS_TO_PSEL(SPIM_NODE, cs_gpios), 0);
+    int error = nrfx_spim_xfer(&spim, &xfer_desc, 0);
+	nrf_gpio_pin_write(NRF_DT_GPIOS_TO_PSEL(SPIM_NODE, cs_gpios), 1);
+    __ASSERT(error == NRFX_SUCCESS, "Error in SPI transmission");
+
+    memcpy(readBuffer, &rx_data[headerLength], readlength);
 
     return 0;
 } // end readfromspi()
 
 void dwt_spi_set_rate_slow()
 {
-    dwt_spi_cfg = &dwt_spi_cfg_slow;
+    PINCTRL_DT_DEFINE(SPIM_NODE);
+
+	nrfx_spim_config_t spim_config = NRFX_SPIM_DEFAULT_CONFIG(
+		NRFX_SPIM_PIN_NOT_USED,
+		NRFX_SPIM_PIN_NOT_USED,
+		NRFX_SPIM_PIN_NOT_USED,
+		NRF_DT_GPIOS_TO_PSEL(SPIM_NODE, cs_gpios));
+	spim_config.frequency = NRF_SPIM_FREQ_2M;
+	spim_config.skip_gpio_cfg = true;
+	spim_config.skip_psel_cfg = true;
+
+	pinctrl_apply_state(PINCTRL_DT_DEV_CONFIG_GET(SPIM_NODE),
+				  PINCTRL_STATE_DEFAULT);
+	nrfx_spim_init(&spim, &spim_config, NULL, NULL);
+
+    nrf_gpio_pin_write(NRF_DT_GPIOS_TO_PSEL(SPIM_NODE, cs_gpios), 1);
+	nrf_gpio_cfg(NRF_DT_GPIOS_TO_PSEL(SPIM_NODE, cs_gpios),
+					NRF_GPIO_PIN_DIR_OUTPUT,
+					NRF_GPIO_PIN_INPUT_DISCONNECT,
+					NRF_GPIO_PIN_NOPULL,
+					NRF_GPIO_PIN_S0S1,
+					NRF_GPIO_PIN_NOSENSE);
+
+    return;
 }
+
 void dwt_spi_set_rate_fast()
 {
-    dwt_spi_cfg = &dwt_spi_cfg_fast;
+    PINCTRL_DT_DEFINE(SPIM_NODE);
+
+	nrfx_spim_config_t spim_config = NRFX_SPIM_DEFAULT_CONFIG(
+		NRFX_SPIM_PIN_NOT_USED,
+		NRFX_SPIM_PIN_NOT_USED,
+		NRFX_SPIM_PIN_NOT_USED,
+		NRF_DT_GPIOS_TO_PSEL(SPIM_NODE, cs_gpios));
+	spim_config.frequency = NRF_SPIM_FREQ_8M;
+	spim_config.skip_gpio_cfg = true;
+	spim_config.skip_psel_cfg = true;
+
+	pinctrl_apply_state(PINCTRL_DT_DEV_CONFIG_GET(SPIM_NODE),
+				  PINCTRL_STATE_DEFAULT);
+	nrfx_spim_init(&spim, &spim_config, NULL, NULL);
+
+    nrf_gpio_pin_write(NRF_DT_GPIOS_TO_PSEL(SPIM_NODE, cs_gpios), 1);
+	nrf_gpio_cfg(NRF_DT_GPIOS_TO_PSEL(SPIM_NODE, cs_gpios),
+					NRF_GPIO_PIN_DIR_OUTPUT,
+					NRF_GPIO_PIN_INPUT_DISCONNECT,
+					NRF_GPIO_PIN_NOPULL,
+					NRF_GPIO_PIN_S0S1,
+					NRF_GPIO_PIN_NOSENSE);
+
+    return;
 }
