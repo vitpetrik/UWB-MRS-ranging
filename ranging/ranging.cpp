@@ -30,7 +30,7 @@
 
 #include "node.h"
 
-LOG_MODULE_REGISTER(ranging);
+LOG_MODULE_REGISTER(ranging, 2);
 
 typedef std::unordered_map<uint32_t, struct node_t *> devices_map_t;
 
@@ -108,6 +108,7 @@ void request_ranging(uint16_t target_id, int preprocessing)
         stats_init(&node->ranging.stats, preprocessing);
     }
 
+    node->ranging.role = INITIATOR;
     node->ranging.ranging_state = ENABLED;
     return;
 }
@@ -245,26 +246,54 @@ int rx_ranging_ds(const uint16_t source_id, void *msg, struct rx_details_t *rx_d
             ranging_pkt.RoundA = rx_timestamp + (0x000000ffffffffffU - tx_timestamp);
     }
 
-    // Setup reply
-    struct tx_details_t tx_details = {
-        .ranging = 1,
-        .tx_mode = DWT_START_TX_DELAYED | DWT_RESPONSE_EXPECTED,
-        .tx_timestamp = &(node->ranging.tx_timestamp),
-        .tx_delay = {.rx_timestamp = rx_details->rx_timestamp, .reserved_time = 1000, .offset = 5}};
+    if(ranging_pkt.packet_number < 4)
+    {
+        // Setup reply
+        struct tx_details_t tx_details = {
+            .ranging = 1,
+            .tx_mode = DWT_START_TX_DELAYED | DWT_RESPONSE_EXPECTED,
+            .tx_timestamp = &(node->ranging.tx_timestamp),
+            .tx_delay = {.rx_timestamp = rx_details->rx_timestamp, .reserved_time = 500, .offset = 5}};
 
-    struct scheduled_ranging *work = (struct scheduled_ranging *)k_malloc(sizeof(struct scheduled_ranging));
-    __ASSERT(work != NULL, "Ouch! malloc failed :-(");
+        struct scheduled_ranging *work = (struct scheduled_ranging *)k_malloc(sizeof(struct scheduled_ranging));
+        __ASSERT(work != NULL, "Ouch! malloc failed :-(");
 
-    uint8_t *write_buffer = &work->buffer[0];
+        uint8_t *write_buffer = &work->buffer[0];
 
-    encode_ranging_pkt(&ranging_pkt, write_buffer);
+        encode_ranging_pkt(&ranging_pkt, write_buffer);
 
-    work->destination = source_id;
-    work->tx_details = tx_details;
+        work->destination = source_id;
+        work->tx_details = tx_details;
 
-    k_work_init_delayable(&work->work, submit_handler);
-    status = k_work_schedule(&work->work, K_MSEC(10 * devices_map.size()));
-    __ASSERT(status >= 0, "Error scheduling delayed work, status: %d", status);
+        k_work_init_delayable(&work->work, submit_handler);
+        status = k_work_schedule(&work->work, K_MSEC(0 * devices_map.size()));
+        __ASSERT(status >= 0, "Error scheduling delayed work, status: %d", status);
+    }
+    else
+    {
+        // Setup reply
+        struct tx_details_t tx_details = {
+            .ranging = 1,
+            .tx_mode = DWT_START_TX_IMMEDIATE | DWT_RESPONSE_EXPECTED,
+            .tx_timestamp = &(node->ranging.tx_timestamp)
+            };
+
+        struct scheduled_ranging *work = (struct scheduled_ranging *)k_malloc(sizeof(struct scheduled_ranging));
+        __ASSERT(work != NULL, "Ouch! malloc failed :-(");
+
+        uint32_t empty[] = {0, 0, 0, 0, 0};
+
+        memcpy(&work->buffer[0], empty, ENCODED_RANGING_PKT_LENGTH);
+
+        work->destination = source_id;
+        work->tx_details = tx_details;
+        node->ranging.expected_packet_number = 1;
+        
+
+        k_work_init_delayable(&work->work, submit_handler);
+        status = k_work_schedule(&work->work, K_MSEC(10 * devices_map.size()));
+        __ASSERT(status >= 0, "Error scheduling delayed work, status: %d", status);
+    }
 
     // Now, calculate the actual if it even makes sense
     if(!stats_is_initialized(&node->ranging.stats))
@@ -362,7 +391,7 @@ void uwb_ranging_thread(void)
             stats_reset(&node->ranging.stats);
 
 
-            LOG_INF("Requesting ranging to device 0x%X", device_id);
+            LOG_WRN("Requesting ranging to device 0x%X", device_id);
             struct tx_details_t tx_details = {
                 .ranging = 1,
                 .tx_mode = DWT_START_TX_IMMEDIATE | DWT_RESPONSE_EXPECTED,
@@ -370,6 +399,6 @@ void uwb_ranging_thread(void)
 
             write_uwb(device_id, DATA, RANGING_MSG_TYPE, (uint8_t *)empty, ENCODED_RANGING_PKT_LENGTH, &tx_details);
         }
-        sleep_ms(100);
+        sleep_ms(3);
     }
 }
