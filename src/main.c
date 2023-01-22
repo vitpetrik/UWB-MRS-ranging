@@ -11,10 +11,12 @@
 
 #include <zephyr/kernel.h>
 #include <zephyr/sys/__assert.h>
+#include <zephyr/timing/timing.h>
+
 #include <zephyr/sys/reboot.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/logging/log_ctrl.h>
-LOG_MODULE_REGISTER(main);
+LOG_MODULE_REGISTER(main, 2);
 
 #include <zephyr/device.h>
 #include <zephyr/devicetree.h>
@@ -182,6 +184,9 @@ void main(void)
     // INITIALIZE
     LOG_INF("%s", APP_NAME);
     LOG_INF("%s", buildString);
+
+    timing_init();
+    timing_start();
 
     // Initiliaze LEDs GPIO
     gpio_pin_configure_dt(&led0red, GPIO_OUTPUT_INACTIVE);
