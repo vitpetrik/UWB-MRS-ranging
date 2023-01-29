@@ -9,26 +9,65 @@
  * 
  */
 
-#include <zephyr/zephyr.h>
+#include <zephyr/kernel.h>
 #include <zephyr/sys/__assert.h>
-#include <zephyr/drivers/uart.h>
-#include <zephyr/console/tty.h>
 #include "uart.h"
+#include <string.h>
+
+#include <nrfx_uarte.h>
+#include <nrfx_gpiote.h>
+
 #include <stdio.h>
 
 #include "common_variables.h"
 #include "common_macro.h"
 
-struct tty_serial tty;
+/** Position of the pin field. */
+#define NRF_PIN_POS 0U
+/** Mask for the pin field. */
+#define NRF_PIN_MSK 0x7FU
 
-struct k_mutex uart_rx_mutex;
-struct k_mutex uart_tx_mutex;
-K_SEM_DEFINE(rx_semaphore, 0, 1);
-K_SEM_DEFINE(tx_semaphore, 1, 1);
+#define NRF_PINSEL(port, pin)						       \
+	(((((port) * 32U) + (pin)) & NRF_PIN_MSK) << NRF_PIN_POS)
 
-uint8_t rx_buffer[1024];
-uint8_t tx_buffer[1024];
+K_SEM_DEFINE(rx_sem, 0, 1);
+K_SEM_DEFINE(tx_sem, 1, 1);
 
+/** @brief Symbol specifying UARTE instance to be used. */
+#define UARTE_INST_IDX 0
+
+/** @brief Symbol specifying TX pin number of UARTE. */
+#define UARTE_TX_PIN NRF_PINSEL(0, 5)
+
+/** @brief Symbol specifying RX pin number of UARTE. */
+#define UARTE_RX_PIN NRF_PINSEL(0, 11)
+
+#define UARTE_INST         NRFX_CONCAT_2(NRF_UARTE, UARTE_INST_IDX)
+#define UARTE_INST_HANDLER NRFX_CONCAT_3(nrfx_uarte_, UARTE_INST_IDX, _irq_handler)
+
+nrfx_uarte_t uarte_inst = NRFX_UARTE_INSTANCE(UARTE_INST_IDX);
+nrfx_uarte_config_t uarte_config = NRFX_UARTE_DEFAULT_CONFIG(UARTE_TX_PIN, UARTE_RX_PIN);
+
+/**
+ * @brief Function for handling UARTE driver events.
+ *
+ * @param[in] p_event   Pointer to event structure. Event is allocated on the stack so it is available
+ *                      only within the context of the event handler.
+ * @param[in] p_context Context passed to the interrupt handler, set on initialization. In this example
+ *                      p_context is used to pass the address of the UARTE instance that calls this handler.
+ */
+static void uarte_handler(nrfx_uarte_event_t const * p_event, void * p_context)
+{
+    nrfx_uarte_t * p_inst = p_context;
+    if (p_event->type == NRFX_UARTE_EVT_TX_DONE)
+    {
+        k_sem_give(&tx_sem);
+    }
+    else if (p_event->type == NRFX_UARTE_EVT_RX_DONE)
+    {
+        k_sem_give(&rx_sem);
+    }
+}
 
 /**
  * @brief Setup UART peripherial
@@ -36,14 +75,16 @@ uint8_t tx_buffer[1024];
  */
 void uart_setup()
 {
-    int status;
-    status = tty_init(&tty, uart_dev);
-    __ASSERT(status == 0, "initiating tty failed");
+    nrfx_err_t status;
+    (void)status;
 
-    status  = tty_set_rx_buf(&tty, (void*) rx_buffer, sizeof(rx_buffer));
-    __ASSERT(status == 0, "Wrong buffer");
-    tty_set_tx_buf(&tty, (void*) tx_buffer, sizeof(tx_buffer));
-    __ASSERT(status == 0, "Wrong buffer");
+    uarte_config.baudrate = NRF_UARTE_BAUDRATE_115200;
+    uarte_config.p_context = &uarte_inst;
+    uarte_config.skip_gpio_cfg = false;
+    status = nrfx_uarte_init(&uarte_inst, &uarte_config, uarte_handler);
+    nrf_gpio_cfg_input(uarte_config.pselrxd, NRF_GPIO_PIN_PULLUP);
+
+    IRQ_CONNECT(NRFX_IRQ_NUMBER_GET(UARTE_INST), 0, UARTE_INST_HANDLER, NULL, 0);
 
     return;
 }
@@ -97,32 +138,46 @@ void write_baca(struct baca_protocol *msg)
  */
 int read_baca(struct baca_protocol *msg)
 {
+    int status;
+
     msg->cksum = 0;
     msg->payload_size = 0;
 
-    uint8_t c = read_char();
-    msg->cksum += c;
+    uint8_t c = '\0';
 
-    if(c != 'b')
+    while(c != 'b')
+        c = read_char();
+
+    msg->cksum = c;
+
+    status = read_buffer(&msg->payload_size, sizeof(msg->payload_size), K_MSEC(10));
+
+    if(status != 0)
         return -1;
 
-    msg->payload_size = read_char();
     msg->cksum += msg->payload_size;
 
-    if (255 < msg->payload_size)
+    if (msg->payload_size == 0 || msg->payload_size > 255)
         return -1;
 
     msg->payload = k_malloc(sizeof(uint8_t)*msg->payload_size);
 
     __ASSERT(msg->payload != NULL, "Failed allocating buffer of size %d Bytes!", msg->payload_size);
 
-    read_buffer(msg->payload, msg->payload_size);
+    status = read_buffer(msg->payload, msg->payload_size, K_MSEC(10));
+
+    if(status != 0)
+    {
+        k_free(msg->payload);
+        return -1;
+    }
 
     msg->cksum += calc_cksum(msg->payload, msg->payload_size);
 
-    uint8_t rx_cksum = read_char();
+    uint8_t rx_cksum;
+    status = read_buffer(&rx_cksum, sizeof(rx_cksum), K_MSEC(10));
 
-    if (rx_cksum != msg->cksum)
+    if(status != 0 || rx_cksum != msg->cksum)
     {
         k_free(msg->payload);
         return -1;
@@ -138,8 +193,8 @@ int read_baca(struct baca_protocol *msg)
  */
 void write_char(uint8_t c)
 {
-    int status = tty_write(&tty, (const void*) &c, 1);
-    __ASSERT(status >= 0, "TTY Write failed!");
+    write_buffer(&c, 1);
+    return;
 }
 
 /**
@@ -150,8 +205,18 @@ void write_char(uint8_t c)
  */
 void write_buffer(uint8_t *buffer, int len)
 {
-    int status = tty_write(&tty, (const void*) buffer, len);
-    __ASSERT(status >= 0, "TTY Write failed!");
+    k_sem_take(&tx_sem, K_FOREVER);
+    int status = nrfx_uarte_tx(&uarte_inst, buffer, len);
+    __ASSERT(status == NRFX_SUCCESS, "UARTE write fail!");
+
+    status = k_sem_take(&tx_sem, K_MSEC(10));
+
+    if(status != 0)
+    {
+        nrfx_uarte_tx_abort(&uarte_inst);
+    }
+
+    k_sem_give(&tx_sem);
     return;
 }
 
@@ -164,8 +229,7 @@ uint8_t read_char()
 {
     uint8_t c;
 
-    int status = tty_read(&tty, (void*) &c, 1);
-    __ASSERT(status >= 0, "TTY read failed!");
+    read_buffer(&c, 1);
 
     return c;
 }
@@ -176,10 +240,12 @@ uint8_t read_char()
  * @param buf pointer to buffer
  * @param len length of the data to be received
  */
-void read_buffer(uint8_t *buf, int len)
+int read_buffer(uint8_t *buf, int len, k_timeout_t timeout)
 {
-    int status = tty_read(&tty, (void*) buf, len);
-    __ASSERT(status >= 0, "TTY read failed!");
+    int status = nrfx_uarte_rx(&uarte_inst, buf, len);
+    __ASSERT(status == NRFX_SUCCESS, "UARTE read failed!");
 
-    return;
+    status = k_sem_take(&rx_sem, timeout);
+
+    return status;
 }

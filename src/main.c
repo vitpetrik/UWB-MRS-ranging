@@ -53,11 +53,6 @@ uint8_t SEQ_NUM;
 
 struct mrs_ranging_t mrs_ranging;
 
-// UART
-
-#define UART_DEVICE_NODE DT_NODELABEL(uart0)
-struct device *uart_dev = DEVICE_DT_GET(UART_DEVICE_NODE);
-
 // LEDS
 
 static const struct gpio_dt_spec led0red = GPIO_DT_SPEC_GET(DT_NODELABEL(led0_red), gpios);
@@ -138,7 +133,9 @@ void setup_dwt()
     // The SPI need to be set to lower speed setting
     dwt_spi_set_rate_slow();
 
-    __ASSERT_NO_MSG(dwt_initialise(DWT_LOADUCODE) == DWT_SUCCESS);
+    int status = dwt_initialise(DWT_LOADUCODE);
+
+    __ASSERT_NO_MSG(status == DWT_SUCCESS);
 
     // Now, we can enable full speed on SPI bus
     dwt_spi_set_rate_fast();
@@ -241,7 +238,7 @@ void main(void)
     if (mrs_ranging.control == STANDALONE)
     {
         k_thread_abort(uwb_ranging_thr);
-        k_thread_abort(ros_tx_thr);
+        k_thread_resume(ros_tx_thr);
 
         k_timer_start(&send_anchor_beacon_timer, K_SECONDS(0), K_SECONDS(10));
     }

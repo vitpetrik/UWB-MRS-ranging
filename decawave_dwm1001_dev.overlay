@@ -21,3 +21,8 @@
 &ieee802154 {
 	status = "disabled";
 };
+
+&uart0 {
+	compatible = "nordic,nrf-uarte";
+	status = "disabled";
+};

@@ -89,7 +89,7 @@ uint8_t read_char();
  * @param buf pointer to buffer
  * @param len length of the data to be received
  */
-void read_buffer(uint8_t *buf, int len);
+int read_buffer(uint8_t *buf, int len, k_timeout_t timeout);
 
 #ifdef __cplusplus
 }
