@@ -289,9 +289,10 @@ int rx_ranging_ds(const uint16_t source_id, void *msg, struct rx_details_t *rx_d
         work->tx_details = tx_details;
         node->ranging.expected_packet_number = 1;
         
+        float delay = 5e3*sys_rand32_get()/0xffffffff;
 
         k_work_init_delayable(&work->work, submit_handler);
-        status = k_work_schedule(&work->work, K_MSEC(10 * devices_map.size()));
+        status = k_work_schedule(&work->work, K_USEC((int) (10e3 + delay)*devices_map.size()));
         __ASSERT(status >= 0, "Error scheduling delayed work, status: %d", status);
     }
 

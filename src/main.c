@@ -119,6 +119,9 @@ K_THREAD_DEFINE(uwb_tx_thr, 1024, uwb_tx_thread, NULL, NULL, NULL, -2, 0, 0);
 void send_anchor_beacon_cb(struct k_timer *timer);
 K_TIMER_DEFINE(send_anchor_beacon_timer, send_anchor_beacon_cb, NULL);
 
+void alive_msg_cb(struct k_timer *timer);
+K_TIMER_DEFINE(alive_msg_timer, alive_msg_cb, NULL);
+
 void button_pressed(const struct device *dev, struct gpio_callback *cb, uint32_t pins);
 
 /**
@@ -249,6 +252,9 @@ void main(void)
     {
         k_thread_resume(uwb_ranging_thr);
         k_thread_resume(ros_tx_thr);
+        k_timer_stop(&send_anchor_beacon_timer);
+
+        k_timer_start(&alive_msg_timer, K_SECONDS(1), K_SECONDS(1));
     }
 
     k_thread_resume(ros_rx_thr);
@@ -368,6 +374,22 @@ K_WORK_DEFINE(send_anchor_work, send_anchor_beacon);
 void send_anchor_beacon_cb(struct k_timer *timer)
 {
     k_work_submit(&send_anchor_work);
+    return;
+}
+
+void alive_msg_cb(struct k_timer *timer)
+{
+    struct baca_protocol msg_tx;
+    struct ros_msg_t ros;
+    msg_tx.payload = k_malloc(256);
+
+    ros.address = WHO_I_AM;
+    ros.mode = 'w';
+    memcpy(ros.data.id_msg.id, APP_NAME, sizeof(APP_NAME));
+    
+    msg_tx.payload_size = serialize_ros(&ros, msg_tx.payload);
+    write_baca(&msg_tx);
+    k_free(msg_tx.payload);
     return;
 }
 
