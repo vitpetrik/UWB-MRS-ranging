@@ -254,7 +254,7 @@ void main(void)
         k_thread_resume(ros_tx_thr);
         k_timer_stop(&send_anchor_beacon_timer);
 
-        k_timer_start(&alive_msg_timer, K_SECONDS(1), K_SECONDS(1));
+        k_timer_stop(&alive_msg_timer);
     }
 
     k_thread_resume(ros_rx_thr);

@@ -2,8 +2,8 @@
     "nrf-connect.applications": [
         "${workspaceFolder}"
     ],
-    "nrf-connect.topdir": "${nrf-connect.sdk:2.1.2}",
-    "nrf-connect.toolchain.path": "${nrf-connect.toolchain:2.1.2}",
+    "nrf-connect.topdir": "${nrf-connect.sdk:2.3.0}",
+    "nrf-connect.toolchain.path": "${nrf-connect.toolchain:2.3.0}",
     "files.associations": {
         "deca_device_api.h": "c",
         "beacon.pb.h": "c",
@@ -25,5 +25,6 @@
         "platform.h": "c",
         "spi.h": "c"
     },
-    "cortex-debug.variableUseNaturalFormat": false
+    "cortex-debug.variableUseNaturalFormat": false,
+    "C_Cpp.default.configurationProvider": "nordic-semiconductor.nrf-connect"
 }
