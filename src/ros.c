@@ -55,6 +55,10 @@ int serialize_ros(const struct ros_msg_t *msg, uint8_t *buf)
         index += sizeof(msg->data.ranging_msg.variance);
         memcpy(&buf[index], &msg->data.ranging_msg.raw, sizeof(msg->data.ranging_msg.raw));
         index += sizeof(msg->data.ranging_msg.raw);
+        memcpy(&buf[index], &msg->data.ranging_msg.power_a, sizeof(msg->data.ranging_msg.power_a));
+        index += sizeof(msg->data.ranging_msg.power_a);
+        memcpy(&buf[index], &msg->data.ranging_msg.power_b, sizeof(msg->data.ranging_msg.power_b));
+        index += sizeof(msg->data.ranging_msg.power_b);
         break;
     case TRX_DATA:
         memcpy(&buf[index], &msg->data.uwb_data_msg.source_mac, sizeof(msg->data.uwb_data_msg.source_mac));
