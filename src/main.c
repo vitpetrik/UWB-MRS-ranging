@@ -246,7 +246,7 @@ void main(void)
         k_thread_abort(uwb_ranging_thr);
         k_thread_abort(ros_tx_thr);
 
-        k_timer_start(&send_anchor_beacon_timer, K_SECONDS(0), K_SECONDS(10));
+        k_timer_start(&send_anchor_beacon_timer, K_SECONDS(0), K_SECONDS(1));
     }
     else
     {

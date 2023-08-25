@@ -53,6 +53,8 @@ int decode_ranging_pkt(struct ranging_pkt_t *ranging_pkt, const uint8_t *buffer_
     buffer_rx += sizeof(uint32_t);
     memcpy(&ranging_pkt->DelayA, buffer_rx, sizeof(uint32_t));
     buffer_rx += sizeof(uint32_t);
+    memcpy(&ranging_pkt->power, buffer_rx, sizeof(float));
+    buffer_rx += sizeof(uint32_t);
 
     return ENCODED_RANGING_PKT_LENGTH;
 }
@@ -73,6 +75,8 @@ int encode_ranging_pkt(const struct ranging_pkt_t *ranging_pkt, uint8_t *buffer_
     memcpy(buffer_tx, &ranging_pkt->DelayA, sizeof(uint32_t));
     buffer_tx += sizeof(uint32_t);
     memcpy(buffer_tx, &ranging_pkt->DelayB, sizeof(uint32_t));
+    buffer_tx += sizeof(uint32_t);
+    memcpy(buffer_tx, &ranging_pkt->power, sizeof(float));
     buffer_tx += sizeof(uint32_t);
 
     return ENCODED_RANGING_PKT_LENGTH;
@@ -188,6 +192,9 @@ int rx_ranging_ds(const uint16_t source_id, void *msg, struct rx_details_t *rx_d
     ranging_pkt_t ranging_pkt;
     decode_ranging_pkt(&ranging_pkt, (const uint8_t *)msg);
 
+    float power_b = ranging_pkt.power;
+    ranging_pkt.power = rx_details->rx_power;
+
     //  Create node if not existing yet
     if (not devices_map.contains(source_id))
     {
@@ -296,9 +303,9 @@ int rx_ranging_ds(const uint16_t source_id, void *msg, struct rx_details_t *rx_d
         __ASSERT(status >= 0, "Error scheduling delayed work, status: %d", status);
     }
 
-    // Now, calculate the actual if it even makes sense
-    if(!stats_is_initialized(&node->ranging.stats))
-        return 0;
+    // // Now, calculate the actual if it even makes sense
+    // if(!stats_is_initialized(&node->ranging.stats))
+    //     return 0;
 
     if (ranging_pkt.RoundA == 0 || ranging_pkt.DelayA == 0 || ranging_pkt.RoundB == 0 || ranging_pkt.DelayB == 0)
         return 0;
@@ -324,6 +331,8 @@ int rx_ranging_ds(const uint16_t source_id, void *msg, struct rx_details_t *rx_d
     uwb_msg.data.ranging_msg.range = stats_get_mean(stats);
     uwb_msg.data.ranging_msg.variance = stats_get_variance(stats);
     uwb_msg.data.ranging_msg.raw = stats_get_raw(stats);
+    uwb_msg.data.ranging_msg.power_a = rx_details->rx_power;
+    uwb_msg.data.ranging_msg.power_b = power_b;
 
     LOG_INF("Ranging from ID 0x%X %.2f m | %.4f dev TOF: %.2f ns", source_id, stats_get_mean(stats), stats_get_variance(stats), tof*1e9);
 

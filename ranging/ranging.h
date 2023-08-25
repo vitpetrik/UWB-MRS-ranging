@@ -33,7 +33,7 @@ enum
 #include "common_types.h"
 #include "deca_device_api.h"
 
-#define ENCODED_RANGING_PKT_LENGTH 13
+#define ENCODED_RANGING_PKT_LENGTH 17
 
 struct ranging_pkt_t {
     uint8_t packet_number;
@@ -41,6 +41,7 @@ struct ranging_pkt_t {
     uint32_t DelayA;
     uint32_t RoundB;
     uint32_t DelayB;
+    float power;
 };
 
 #pragma once
